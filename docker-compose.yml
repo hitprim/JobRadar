@@ -1,0 +1,26 @@
+# JobRadar — локальная инфраструктура для разработки.
+# В v0.1 поднимаем только PostgreSQL. n8n добавится в v0.2.
+# FastAPI / aiogram / frontend запускаются локально через uv / npm.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: jobradar_postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-jobradar}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_DB: ${DB_NAME:-jobradar}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-jobradar} -d ${DB_NAME:-jobradar}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: jobradar_postgres_data

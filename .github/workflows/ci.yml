@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Отменяем устаревшие запуски при новом push в ту же ветку
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend (lint + type + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: jobradar
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: jobradar
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jobradar"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Конфигурация для pydantic-settings — все переменные приложения.
+      ENV: dev
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: jobradar
+      DB_PASSWORD: ci-test-password
+      DB_NAME: jobradar
+      BOT_TOKEN: "0000000000:AAAA-ci-stub-token"
+      OPENROUTER_API_KEY: "sk-or-ci-stub"
+      JWT_SECRET: "ci-jwt-secret-must-be-at-least-32-chars-long-aaaaaaa"
+      JWT_ALGORITHM: HS256
+      JWT_TTL_MINUTES: "43200"
+      # base64(32 zero bytes) — детерминированный KEK для CI
+      ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.7"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Set up Python from .python-version
+        run: uv python install
+
+      - name: Sync deps
+        run: uv sync --frozen --all-groups
+
+      - name: Ruff (lint)
+        run: uv run ruff check .
+
+      - name: Ruff (format check)
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy src
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U jobradar > /dev/null 2>&1; then
+              echo "postgres is ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "postgres did not become ready"; exit 1
+
+      - name: Alembic migrations
+        run: uv run alembic upgrade head
+
+      - name: Verify migration applied (seed config rows)
+        env:
+          PGPASSWORD: ci-test-password
+        run: |
+          count=$(psql -h localhost -U jobradar -d jobradar -At -c "SELECT count(*) FROM config")
+          test "$count" = "7" || (echo "expected 7 config rows, got $count"; exit 1)
+
+      - name: Pytest
+        run: uv run pytest -v

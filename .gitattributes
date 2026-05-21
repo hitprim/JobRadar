@@ -1,0 +1,22 @@
+# Принудительно LF в репозитории (важно для Linux-деплоя)
+* text=auto eol=lf
+
+# Windows-специфичные файлы
+*.bat        text eol=crlf
+*.cmd        text eol=crlf
+*.ps1        text eol=crlf
+
+# Бинарники
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.ico        binary
+*.pdf        binary
+*.zip        binary
+*.gz         binary
+
+# Не считать diff'ом
+*.lock       linguist-generated=true
+uv.lock      linguist-generated=true
+package-lock.json linguist-generated=true
