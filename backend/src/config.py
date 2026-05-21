@@ -35,6 +35,14 @@ class Settings(BaseSettings):
 
     # --- LLM ---
     openrouter_api_key: str
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "deepseek/deepseek-chat"
+    openrouter_timeout_seconds: float = 30.0
+    # Сколько раз ретраить при невалидном JSON-ответе или 5xx
+    llm_max_retries: int = 2
+    # Максимальная длина одного user-поля (резюме, описание вакансии) в символах
+    # — обрезаем перед отправкой в LLM, чтобы не упереться в context window
+    llm_field_max_chars: int = 12_000
 
     # --- Security ---
     jwt_secret: str = Field(min_length=32)

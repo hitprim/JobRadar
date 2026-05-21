@@ -197,5 +197,18 @@ class ReactionRequest(BaseModel):
     reaction: str = Field(pattern="^(like|skip|save)$")
 
 
+# ============================================================================
+# Scoring
+# ============================================================================
+
+
+class ScoreResponse(BaseModel):
+    score: int = Field(ge=0, le=100)
+    reason: str
+    red_flags: list[str] = Field(default_factory=list)
+    green_flags: list[str] = Field(default_factory=list)
+    from_cache: bool
+
+
 # Resolve forward ref
 TelegramAuthResponse.model_rebuild()

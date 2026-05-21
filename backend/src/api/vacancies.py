@@ -1,9 +1,10 @@
-"""Vacancies + Feed.
+"""Vacancies + Feed + Scoring.
 
 Endpoints:
     GET  /api/profiles/{profile_id}/feed?limit=&offset=
     GET  /api/vacancies/{vacancy_id}
     POST /api/vacancies/{vacancy_id}/reaction
+    POST /api/vacancies/{vacancy_id}/score?profile_id=&force=
 """
 
 from __future__ import annotations
@@ -17,16 +18,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.schemas import (
     FeedItemPublic,
     ReactionRequest,
+    ScoreResponse,
     VacancyPublic,
     VacancyReactionPublic,
 )
 from src.db.repositories import (
     ProfileRepository,
     ReactionRepository,
+    UserRepository,
     VacancyRepository,
 )
 from src.db.session import get_session
+from src.llm import LLMError, LLMProvider, get_llm_provider
 from src.security.deps import CurrentUserId
+from src.services.scoring import (
+    ProfileNotAccessibleError,
+    ScoringService,
+    VacancyNotFoundError,
+)
 from src.sources.base import SourceError
 from src.sources.hh import HhSource
 
@@ -115,3 +124,54 @@ async def react_to_vacancy(
     )
     await session.commit()
     return VacancyReactionPublic.model_validate(saved)
+
+
+@router.post(
+    "/api/vacancies/{vacancy_id}/score",
+    response_model=ScoreResponse,
+    tags=["vacancies"],
+)
+async def score_vacancy(
+    vacancy_id: int,
+    session: SessionDep,
+    user_id: CurrentUserId,
+    llm: Annotated[LLMProvider, Depends(get_llm_provider)],
+    profile_id: int = Query(..., description="ID профиля, для которого оцениваем"),
+    force: bool = Query(False, description="Перескорить даже если score уже в кэше"),
+) -> ScoreResponse:
+    service = ScoringService(
+        llm,
+        profiles=ProfileRepository(session),
+        vacancies=VacancyRepository(session),
+        reactions=ReactionRepository(session),
+        users=UserRepository(session),
+    )
+    try:
+        result, _reaction, used_cache = await service.score_vacancy(
+            vacancy_id=vacancy_id,
+            profile_id=profile_id,
+            user_id=user_id,
+            force=force,
+        )
+    except ProfileNotAccessibleError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except VacancyNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LLMError as exc:
+        logger.bind(error=str(exc)).error("scoring: LLM failure")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"LLM provider error: {exc}",
+        ) from exc
+
+    # При cache-hit БД не менялась, но commit безопасен (no-op).
+    if not used_cache:
+        await session.commit()
+
+    return ScoreResponse(
+        score=result.score,
+        reason=result.reason,
+        red_flags=result.red_flags,
+        green_flags=result.green_flags,
+        from_cache=used_cache,
+    )

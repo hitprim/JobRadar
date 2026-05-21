@@ -134,3 +134,10 @@ class ProfileRepository(BaseRepository):
         if orm is None or orm.user_id != user_id or orm.resume_encrypted is None:
             return None
         return decrypt_resume(wrapped_dek, orm.resume_encrypted)
+
+    async def get_resume_encrypted(self, profile_id: int, user_id: int) -> bytes | None:
+        """Возвращает сырое шифр-blob без расшифровки. Дешифровка — на стороне сервиса."""
+        orm = await self.session.get(ProfileORM, profile_id)
+        if orm is None or orm.user_id != user_id:
+            return None
+        return orm.resume_encrypted
