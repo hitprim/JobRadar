@@ -51,6 +51,10 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Один event loop на всю сессию — иначе session-scope async fixtures
+# не доживают до следующего теста (особенно болезненно на Windows / ProactorEventLoop).
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 pythonpath = ["."]
 

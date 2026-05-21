@@ -60,5 +60,10 @@ n8n_data/
 *.log
 logs/
 
+# Claude Code locals
+.claude/
+run.json
+*.tmp.json
+
 # Alembic — do NOT ignore versions, only local artifacts
 # (versions/ commits to git)

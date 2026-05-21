@@ -7,7 +7,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,6 +30,8 @@ class Settings(BaseSettings):
 
     # --- Telegram ---
     bot_token: str
+    # Срок жизни поля auth_date в initData (защита от replay).
+    init_data_ttl_seconds: int = 24 * 60 * 60  # 24 часа
 
     # --- LLM ---
     openrouter_api_key: str
@@ -42,6 +44,16 @@ class Settings(BaseSettings):
     # KEK для envelope encryption — base64-encoded 32 байта
     encryption_key: str
 
+    # --- CORS ---
+    # CSV-список origin'ов. В dev пустой → разрешаем всем ('*').
+    # В prod обязателен непустой whitelist (валидируется при старте, см. ниже).
+    backend_cors_origins: str = ""
+
+    @field_validator("backend_cors_origins")
+    @classmethod
+    def _strip_cors(cls, v: str) -> str:
+        return v.strip()
+
     @property
     def database_url(self) -> str:
         return (
@@ -52,6 +64,25 @@ class Settings(BaseSettings):
     @property
     def is_dev(self) -> bool:
         return self.env == "dev"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        """Парсит backend_cors_origins в список.
+
+        Правила:
+        - dev + пусто → ["*"] (удобство локальной разработки)
+        - prod + пусто → исключение (явный whitelist обязателен)
+        - непустая строка → CSV split, trim, пустые пропускаем
+        """
+        raw = self.backend_cors_origins
+        if not raw:
+            if self.is_dev:
+                return ["*"]
+            raise ValueError(
+                "BACKEND_CORS_ORIGINS must be set in production "
+                "(comma-separated whitelist of allowed origins)"
+            )
+        return [o.strip() for o in raw.split(",") if o.strip()]
 
 
 @lru_cache(maxsize=1)
