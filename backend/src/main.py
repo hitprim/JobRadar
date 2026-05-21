@@ -4,15 +4,23 @@
     uv run uvicorn src.main:app --reload --port 8000
 
 Endpoints v0.1:
-    GET  /health                  — liveness
-    GET  /health/ready            — readiness (проверка БД)
-    POST /api/auth/telegram       — авторизация через Telegram initData
-    GET  /api/profiles            — список профилей юзера
-    POST /api/profiles            — создать профиль
-    PATCH /api/profiles/{id}      — обновить (без resume)
-    PUT  /api/profiles/{id}/resume — обновить резюме (отдельно — 50KB шифротекста)
-    DELETE /api/profiles/{id}     — soft-delete
-    POST /api/profiles/{id}/activate — сделать активным
+    GET  /health                            — liveness
+    GET  /health/ready                      — readiness (проверка БД)
+    POST /api/auth/telegram                 — авторизация через Telegram initData
+    GET  /api/profiles                      — список профилей юзера
+    POST /api/profiles                      — создать профиль
+    PATCH /api/profiles/{id}                — обновить (без resume)
+    PUT  /api/profiles/{id}/resume          — обновить резюме
+    GET  /api/profiles/{id}/resume          — получить резюме
+    DELETE /api/profiles/{id}               — soft-delete
+    POST /api/profiles/{id}/activate        — сделать активным
+    GET  /api/profiles/{id}/sources         — список источников профиля
+    POST /api/profiles/{id}/sources         — добавить источник
+    DELETE /api/sources/{id}                — удалить источник
+    POST /api/sources/{id}/refresh          — ручной запуск парсинга
+    GET  /api/profiles/{id}/feed            — лента вакансий
+    GET  /api/vacancies/{id}                — детали вакансии (с lazy fetch_details)
+    POST /api/vacancies/{id}/reaction       — like/skip/save
 """
 
 from __future__ import annotations
@@ -28,18 +36,23 @@ from sqlalchemy import text
 
 from src.api import auth as auth_router
 from src.api import profiles as profiles_router
+from src.api import sources as sources_router
+from src.api import vacancies as vacancies_router
 from src.config import settings
 from src.db.session import engine
 from src.logging_setup import setup_logging
+from src.services.scheduler import start_scheduler, stop_scheduler
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
     logger.bind(env=settings.env).info("JobRadar API starting")
+    start_scheduler()
     try:
         yield
     finally:
+        stop_scheduler()
         await engine.dispose()
         logger.info("JobRadar API stopped")
 
@@ -85,6 +98,8 @@ async def ready() -> JSONResponse:
     )
 
 
-# Бизнес-роутеры
+# Бизнес-роутеры. sources/vacancies подключаются без префикса — пути полные.
 app.include_router(auth_router.router, prefix="/api/auth", tags=["auth"])
 app.include_router(profiles_router.router, prefix="/api/profiles", tags=["profiles"])
+app.include_router(sources_router.router)
+app.include_router(vacancies_router.router)

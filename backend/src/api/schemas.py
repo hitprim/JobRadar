@@ -118,5 +118,84 @@ class ResumeResponse(BaseModel):
     resume_text: str | None  # None если резюме не было загружено
 
 
+# ============================================================================
+# Sources
+# ============================================================================
+
+
+class SourcePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    type: str
+    search_params: dict[str, Any] | None
+    is_active: bool
+    last_parsed_at: datetime | None
+    last_status: str | None
+    last_error: str | None
+    vacancies_today: int
+
+
+class SourceCreateRequest(BaseModel):
+    type: str = Field(default="hh", pattern="^(hh|habr|avito|custom)$")
+    search_params: dict[str, Any] | None = None
+
+
+class ParseResultPublic(BaseModel):
+    source_id: int
+    fetched: int
+    inserted: int
+    updated: int
+    status: str
+    error: str | None = None
+
+
+# ============================================================================
+# Vacancies + Feed
+# ============================================================================
+
+
+class VacancyPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    external_id: str
+    source_type: str
+    title: str | None
+    company_name: str | None
+    company_id: str | None
+    salary_from: int | None
+    salary_to: int | None
+    salary_currency: str | None
+    url: str | None
+    area_name: str | None
+    schedule: str | None
+    experience: str | None
+    description: str | None
+    key_skills: list[str]
+    published_at: datetime | None
+    parsed_at: datetime
+
+
+class VacancyReactionPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    reaction: str | None
+    score: int | None
+    score_reason: str | None
+    red_flags: list[str]
+    scored_at: datetime | None
+
+
+class FeedItemPublic(BaseModel):
+    vacancy: VacancyPublic
+    reaction: VacancyReactionPublic | None
+
+
+class ReactionRequest(BaseModel):
+    reaction: str = Field(pattern="^(like|skip|save)$")
+
+
 # Resolve forward ref
 TelegramAuthResponse.model_rebuild()

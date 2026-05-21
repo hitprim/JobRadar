@@ -25,6 +25,8 @@ dependencies = [
     # Security
     "cryptography>=44",
     "pyjwt>=2.10",
+    # Scheduler
+    "apscheduler>=3.10",
 ]
 
 [dependency-groups]

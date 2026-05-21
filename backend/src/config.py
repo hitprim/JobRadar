@@ -44,6 +44,22 @@ class Settings(BaseSettings):
     # KEK для envelope encryption — base64-encoded 32 байта
     encryption_key: str
 
+    # --- Parser / hh.ru ---
+    hh_api_base_url: str = "https://api.hh.ru"
+    # In-process scheduler: по умолчанию ВЫКЛЮЧЕН.
+    # В prod включается явно. Ручной refresh через POST /sources/{id}/refresh работает всегда.
+    parser_enabled: bool = False
+    parser_interval_minutes: int = 60
+    # Сколько вакансий тянуть за один прогон парсера (на источник).
+    parser_max_pages: int = 5
+    parser_per_page: int = 50
+    # Период публикации (дни) для запросов к hh.ru. По умолчанию 7 дней.
+    parser_period_days: int = 7
+    # Тайм-аут запроса к hh.ru
+    parser_http_timeout_seconds: float = 10.0
+    # Контактный email (требуется для User-Agent в запросах к hh.ru API)
+    hh_user_agent_contact: str = "jobradar@example.com"
+
     # --- CORS ---
     # CSV-список origin'ов. В dev пустой → разрешаем всем ('*').
     # В prod обязателен непустой whitelist (валидируется при старте, см. ниже).
