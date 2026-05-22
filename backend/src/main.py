@@ -35,6 +35,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from src.api import auth as auth_router
+from src.api import letters as letters_router
 from src.api import profiles as profiles_router
 from src.api import sources as sources_router
 from src.api import vacancies as vacancies_router
@@ -103,3 +104,4 @@ app.include_router(auth_router.router, prefix="/api/auth", tags=["auth"])
 app.include_router(profiles_router.router, prefix="/api/profiles", tags=["profiles"])
 app.include_router(sources_router.router)
 app.include_router(vacancies_router.router)
+app.include_router(letters_router.router)

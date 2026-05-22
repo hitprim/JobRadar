@@ -7,6 +7,7 @@
 это позволяет подменять их mock'ами в тестах.
 """
 
+from src.db.repositories.letter import LetterRepository
 from src.db.repositories.profile import ProfileRepository
 from src.db.repositories.reaction import ReactionRepository
 from src.db.repositories.source import SourceRepository
@@ -14,6 +15,7 @@ from src.db.repositories.user import UserRepository
 from src.db.repositories.vacancy import VacancyRepository
 
 __all__ = [
+    "LetterRepository",
     "ProfileRepository",
     "ReactionRepository",
     "SourceRepository",

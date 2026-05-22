@@ -210,5 +210,36 @@ class ScoreResponse(BaseModel):
     from_cache: bool
 
 
+# ============================================================================
+# Letters
+# ============================================================================
+
+
+class LetterPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    vacancy_id: int
+    text: str | None
+    prompt_used: str | None
+    used_in_application: bool
+    created_at: datetime
+
+
+class LetterGenerateRequest(BaseModel):
+    extra_instructions: str | None = Field(default=None, max_length=2000)
+
+
+class LetterGenerateResponse(BaseModel):
+    letter: LetterPublic
+    draft_notes: list[str] = Field(default_factory=list)
+
+
+class LetterPatchRequest(BaseModel):
+    text: str | None = Field(default=None, min_length=1, max_length=5000)
+    used_in_application: bool | None = None
+
+
 # Resolve forward ref
 TelegramAuthResponse.model_rebuild()

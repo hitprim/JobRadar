@@ -74,6 +74,26 @@ def good_scoring_response(
     }
 
 
+def good_letter_response(
+    *,
+    letter_text: str | None = None,
+    draft_notes: list[str] | None = None,
+) -> dict:
+    if letter_text is None:
+        # 250+ символов — попадает в min_length=200 schema
+        letter_text = (
+            "Здравствуйте! Меня заинтересовала ваша вакансия Senior Python "
+            "разработчика в Acme. Особенно привлекла часть про микросервисы и "
+            "Kubernetes — у меня есть опыт построения подобных систем на "
+            "FastAPI и асинхронном Python. Готов обсудить детали на собеседовании."
+        )
+    return {
+        "letter_text": letter_text,
+        "draft_notes": draft_notes
+        or ["used 'FastAPI' from profile", "mentioned 'Kubernetes' from vacancy"],
+    }
+
+
 def encode_as_openrouter_payload(data: dict) -> dict:
     """Оборачивает dict как ответ chat-completions для тестов OpenRouterProvider."""
     return {
