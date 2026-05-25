@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     bot_token: str
     # Срок жизни поля auth_date в initData (защита от replay).
     init_data_ttl_seconds: int = 24 * 60 * 60  # 24 часа
+    # URL MiniApp для inline-кнопки в боте. Пусто = кнопка не показывается.
+    # В prod ставим публичный HTTPS URL (зарегистрированный в @BotFather).
+    miniapp_url: str = ""
 
     # --- LLM ---
     openrouter_api_key: str
@@ -58,6 +61,9 @@ class Settings(BaseSettings):
     # В prod включается явно. Ручной refresh через POST /sources/{id}/refresh работает всегда.
     parser_enabled: bool = False
     parser_interval_minutes: int = 60
+    # Интервалы для notification-job'ов (тот же scheduler, тот же PARSER_ENABLED флаг).
+    alerts_interval_minutes: int = 60
+    reminders_interval_minutes: int = 15
     # Сколько вакансий тянуть за один прогон парсера (на источник).
     parser_max_pages: int = 5
     parser_per_page: int = 50

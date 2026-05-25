@@ -36,6 +36,7 @@ from sqlalchemy import text
 
 from src.api import applications as applications_router
 from src.api import auth as auth_router
+from src.api import billing as billing_router
 from src.api import letters as letters_router
 from src.api import profiles as profiles_router
 from src.api import sources as sources_router
@@ -107,3 +108,4 @@ app.include_router(sources_router.router)
 app.include_router(vacancies_router.router)
 app.include_router(letters_router.router)
 app.include_router(applications_router.router)
+app.include_router(billing_router.router)

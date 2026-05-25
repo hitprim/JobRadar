@@ -26,5 +26,6 @@ class User(BaseModel):
     first_name: str | None
     active_profile_id: int | None
     credits: int
+    notifications_enabled: bool
     created_at: datetime
     last_active_at: datetime | None

@@ -37,6 +37,7 @@ def _to_domain(orm: ApplicationORM) -> Application:
         cover_letter=orm.cover_letter,
         notes=orm.notes,
         next_reminder_at=orm.next_reminder_at,
+        reminder_sent_at=orm.reminder_sent_at,
         created_at=orm.created_at,
         updated_at=orm.updated_at,
     )

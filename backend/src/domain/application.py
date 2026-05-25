@@ -29,6 +29,7 @@ class Application(BaseModel):
     cover_letter: str | None
     notes: str | None
     next_reminder_at: datetime | None
+    reminder_sent_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

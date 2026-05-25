@@ -61,6 +61,11 @@ class User(Base):
 
     credits: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
+    # Подписка на уведомления бота (вакансии + reminders). Управляется через /notifications
+    notifications_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )
@@ -255,6 +260,9 @@ class Application(Base):
     cover_letter: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
     next_reminder_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    # Время фактической отправки напоминания. NULL = ещё не отправили.
+    # После отправки next_reminder_at сбрасываем в NULL чтобы не отправить повторно.
+    reminder_sent_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
