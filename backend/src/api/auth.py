@@ -81,3 +81,45 @@ async def telegram_login(body: TelegramAuthRequest, session: SessionDep) -> Tele
         user=UserPublic.model_validate(result.user),
         is_new_user=result.created,
     )
+
+
+@router.post(
+    "/dev",
+    response_model=TelegramAuthResponse,
+    summary="DEV-ONLY: вход без Telegram (для локальной разработки UI)",
+)
+async def dev_login(session: SessionDep) -> TelegramAuthResponse:
+    """Возвращает валидный JWT для фиктивного юзера. Доступен только в dev.
+
+    Используется фронтом при запуске в обычном браузере (без Telegram WebApp).
+    В prod возвращает 404.
+
+    Юзер всегда тот же (telegram_id=999000001), чтобы данные между сессиями
+    сохранялись — удобно для итеративной разработки.
+    """
+    if not settings.is_dev:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    from src.security.telegram_auth import TelegramUser
+
+    fake_user = TelegramUser(
+        id=999_000_001,
+        first_name="Dev",
+        last_name="User",
+        username="dev_user",
+        language_code="ru",
+        is_premium=False,
+    )
+
+    service = UserService(UserRepository(session))
+    result = await service.upsert_from_telegram(fake_user)
+    await session.commit()
+
+    token = encode_access_token(user_id=result.user.id, telegram_id=result.user.telegram_id)
+    logger.bind(user_id=result.user.id).warning("DEV LOGIN — not for production")
+    return TelegramAuthResponse(
+        access_token=token,
+        expires_in=settings.jwt_ttl_minutes * 60,
+        user=UserPublic.model_validate(result.user),
+        is_new_user=result.created,
+    )
