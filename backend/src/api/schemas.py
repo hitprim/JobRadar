@@ -241,5 +241,56 @@ class LetterPatchRequest(BaseModel):
     used_in_application: bool | None = None
 
 
+# ============================================================================
+# Applications (Tracker)
+# ============================================================================
+
+
+class ApplicationPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    vacancy_id: int
+    status: str
+    cover_letter: str | None
+    notes: str | None
+    next_reminder_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ApplicationCreateRequest(BaseModel):
+    vacancy_id: int
+    cover_letter: str | None = Field(default=None, max_length=10_000)
+    notes: str | None = Field(default=None, max_length=5_000)
+    next_reminder_at: datetime | None = None
+
+
+_STATUS_PATTERN = r"^(sent|hr|tech|final|offer|reject)$"
+
+
+class ApplicationPatchRequest(BaseModel):
+    status: str | None = Field(default=None, pattern=_STATUS_PATTERN)
+    cover_letter: str | None = Field(default=None, max_length=10_000)
+    notes: str | None = Field(default=None, max_length=5_000)
+    next_reminder_at: datetime | None = None
+
+
+class ApplicationStatusHistoryPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    application_id: int
+    status: str
+    changed_at: datetime
+
+
+class FunnelPublic(BaseModel):
+    total: int
+    counts: dict[str, int]
+    conversion_rates: dict[str, float]
+
+
 # Resolve forward ref
 TelegramAuthResponse.model_rebuild()

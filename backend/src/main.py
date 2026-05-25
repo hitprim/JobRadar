@@ -34,6 +34,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy import text
 
+from src.api import applications as applications_router
 from src.api import auth as auth_router
 from src.api import letters as letters_router
 from src.api import profiles as profiles_router
@@ -105,3 +106,4 @@ app.include_router(profiles_router.router, prefix="/api/profiles", tags=["profil
 app.include_router(sources_router.router)
 app.include_router(vacancies_router.router)
 app.include_router(letters_router.router)
+app.include_router(applications_router.router)
