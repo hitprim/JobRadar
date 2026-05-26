@@ -22,10 +22,13 @@ class Settings(BaseSettings):
     env: Literal["dev", "prod"] = "dev"
 
     # --- PostgreSQL ---
+    # В prod: Railway инжектит DATABASE_URL — используем его как есть.
+    # В dev: собираем из DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME.
+    database_url_override: str | None = Field(default=None, alias="DATABASE_URL")
     db_host: str = "localhost"
     db_port: int = 5432
     db_user: str = "jobradar"
-    db_password: str
+    db_password: str = "change-me"
     db_name: str = "jobradar"
 
     # --- Telegram ---
@@ -86,6 +89,19 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        """Возвращает SQLAlchemy async URL.
+
+        - Если задан DATABASE_URL (Railway/CI) — нормализуем драйвер
+          `postgres://` или `postgresql://` → `postgresql+asyncpg://`.
+        - Иначе собираем из DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME.
+        """
+        if self.database_url_override:
+            raw = self.database_url_override
+            for prefix in ("postgresql+asyncpg://", "postgresql://", "postgres://"):
+                if raw.startswith(prefix):
+                    rest = raw[len(prefix) :]
+                    return f"postgresql+asyncpg://{rest}"
+            return raw  # неизвестный формат — отдаём как есть, SQLA скажет
         return (
             f"postgresql+asyncpg://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"

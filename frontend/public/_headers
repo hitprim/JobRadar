@@ -1,0 +1,8 @@
+# Долгий cache на хэшированные ассеты Vite.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Telegram WebApp требует чтобы страница не клались в iframe-блокировки.
+/*
+  X-Frame-Options: ALLOW-FROM https://web.telegram.org/
+  Content-Security-Policy: frame-ancestors 'self' https://web.telegram.org https://*.telegram.org

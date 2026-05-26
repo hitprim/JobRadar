@@ -1,0 +1,16 @@
+# Дев-артефакты, ускоряют build context.
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+__pycache__/
+*.pyc
+*.pyo
+tests/
+scripts/
+*.md
+.git/
+.github/
+.env
+.env.*

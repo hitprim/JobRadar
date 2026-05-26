@@ -5,8 +5,17 @@
 import axios, { AxiosError } from "axios";
 import { useAuth } from "@/store/auth";
 
+/**
+ * Базовый URL backend API.
+ *
+ * - В dev (Vite proxy): `/api` → vite.config проксирует на http://localhost:8000.
+ * - В prod: build с `VITE_API_BASE_URL=https://...railway.app/api`.
+ *   Cloudflare Pages env-переменная задаётся в Project Settings → Environment.
+ */
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/+$/, "");
+
 export const apiClient = axios.create({
-  baseURL: "/api",
+  baseURL: API_BASE_URL,
   timeout: 30000,
   headers: { "Content-Type": "application/json" },
 });
