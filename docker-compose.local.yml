@@ -1,0 +1,85 @@
+# JobRadar — локальный «деплой» через Docker + ngrok (временная мера).
+#
+# Один origin отдаёт и SPA, и /api → достаточно ОДНОГО ngrok-туннеля.
+# Backend на хосте слушает порт 8000 (внутри контейнера тоже 8000).
+#
+# Перед запуском:
+#   1) Собрать фронт:   cd frontend && npm install && npm run build
+#      (VITE_API_BASE_URL НЕ задавать — фронт пойдёт на /api того же origin)
+#   2) Заполнить .env (см. .env.local.example) в корне репо.
+#   3) docker compose -f docker-compose.local.yml up --build -d
+#   4) ngrok http 8000 --domain=gating-reminder-zigzagged.ngrok-free.dev
+#   5) В @BotFather задать Mini App URL = https://gating-reminder-zigzagged.ngrok-free.dev
+#
+# Остановить:  docker compose -f docker-compose.local.yml down
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: jobradar_local_pg
+    environment:
+      POSTGRES_USER: ${DB_USER:-jobradar}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_DB: ${DB_NAME:-jobradar}
+    volumes:
+      - jobradar_local_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-jobradar} -d ${DB_NAME:-jobradar}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jobradar_local_web
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Внутри compose-сети БД доступна по имени сервиса.
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      # Один origin: backend сам отдаёт собранный фронт.
+      FRONTEND_DIST_PATH: /app/frontend_dist
+      # Парсер через системный Chromium (стоит в образе).
+      CHROME_BINARY: /usr/bin/chromium
+      PARSER_USE_CHROME: "true"
+    volumes:
+      # Собранный фронт пробрасываем внутрь (read-only).
+      - ./frontend/dist:/app/frontend_dist:ro
+    ports:
+      # ХОСТ:КОНТЕЙНЕР — ngrok туннелит на хостовый 8000.
+      - "8000:8000"
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn src.main:app --host 0.0.0.0 --port 8000"
+    restart: unless-stopped
+
+  bot:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jobradar_local_bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+    command: ["python", "-m", "src.bot.main"]
+    # Образ общий с backend → наследует HTTP-healthcheck (curl :8000/health),
+    # но бот не поднимает веб-сервер. Отключаем, чтобы не висел "unhealthy".
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+volumes:
+  jobradar_local_pgdata:
+    name: jobradar_local_pgdata
