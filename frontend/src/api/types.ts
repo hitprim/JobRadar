@@ -7,6 +7,7 @@ export type ProfileCategory = "it" | "finance" | "sales" | "medical" | "service"
 export type ProfileGrade = "junior" | "middle" | "senior" | "lead";
 export type WorkFormat = "remote" | "hybrid" | "office";
 export type Schedule = "fullDay" | "shift" | "flexible" | "part";
+export type Experience = "noExperience" | "between1And3" | "between3And6" | "moreThan6";
 export type ApplicationStatus = "sent" | "hr" | "tech" | "final" | "offer" | "reject";
 
 export interface UserPublic {
@@ -38,6 +39,7 @@ export interface Profile {
   salary_currency: string;
   work_format: WorkFormat[];
   schedule: Schedule[];
+  experience: Experience[];
   area_ids: number[];
   exclude_keywords: string[];
   has_resume: boolean;
@@ -57,6 +59,7 @@ export interface ProfileCreateRequest {
   salary_currency?: string;
   work_format?: WorkFormat[];
   schedule?: Schedule[];
+  experience?: Experience[];
   area_ids?: number[];
   exclude_keywords?: string[];
 }
@@ -81,6 +84,8 @@ export interface Vacancy {
   key_skills: string[];
   published_at: string | null;
   parsed_at: string;
+  // true → описание ещё подгружается в фоне; стоит опросить эндпоинт повторно
+  description_pending: boolean;
 }
 
 export interface VacancyReaction {
@@ -91,9 +96,85 @@ export interface VacancyReaction {
   scored_at: string | null;
 }
 
+/** Краткий агрегат отзывов компании для бейджа. */
+export interface CompanyReviewSummary {
+  respect_score: number | null;
+  review_count: number;
+}
+
 export interface FeedItem {
   vacancy: Vacancy;
   reaction: VacancyReaction | null;
+  company_review: CompanyReviewSummary | null;
+}
+
+// ---- Company reviews (отзывы об отношении компаний к соискателям) ----
+
+export type RespondedSignal = "fast" | "slow" | "ignored";
+export type RespectSignal = "respectful" | "neutral" | "dismissive";
+export type FeedbackSignal = "detailed" | "formal" | "none";
+export type HonestySignal = "matched" | "minor" | "mismatch";
+export type ProcessSignal = "smooth" | "tolerable" | "draining";
+
+/** Один отзыв (анонимный — без user_id). */
+export interface CompanyReview {
+  id: number;
+  responded: RespondedSignal;
+  respect: RespectSignal;
+  feedback: FeedbackSignal;
+  honesty: HonestySignal;
+  process: ProcessSignal;
+  text: string | null;
+  score: number;
+  created_at: string;
+}
+
+/** Тело запроса на создание/обновление отзыва. */
+export interface CompanyReviewCreateRequest {
+  responded: RespondedSignal;
+  respect: RespectSignal;
+  feedback: FeedbackSignal;
+  honesty: HonestySignal;
+  process: ProcessSignal;
+  text: string | null;
+}
+
+/** Полный взгляд на отзывы компании для экрана вакансии. */
+export interface CompanyReviewView {
+  company_key: string | null;
+  company_name: string | null;
+  respect_score: number | null;
+  review_count: number;
+  can_review: boolean;
+  my_review: CompanyReview | null;
+  reviews: CompanyReview[];
+}
+
+/** Результат жалобы на отзыв. */
+export interface CompanyReviewReportResponse {
+  report_count: number;
+  hidden: boolean;
+}
+
+// ---- Letter templates (сохранённые шаблоны сопроводительных) ----
+
+export interface LetterTemplate {
+  id: number;
+  profile_id: number;
+  title: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LetterTemplateCreateRequest {
+  title: string;
+  body: string;
+}
+
+export interface LetterTemplatePatchRequest {
+  title?: string;
+  body?: string;
 }
 
 export interface Source {
@@ -115,6 +196,11 @@ export interface ParseResult {
   updated: number;
   status: string;
   error: string | null;
+}
+
+export interface RefreshAccepted {
+  source_id: number;
+  status: string; // "started"
 }
 
 export interface ScoreResponse {
@@ -148,8 +234,16 @@ export interface Application {
   cover_letter: string | null;
   notes: string | null;
   next_reminder_at: string | null;
+  reminder_sent_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Элемент списка трекера: Application + поля вакансии (join на бэкенде). */
+export interface ApplicationListItem extends Application {
+  vacancy_title: string | null;
+  company_name: string | null;
+  vacancy_url: string | null;
 }
 
 export interface ApplicationStatusHistory {

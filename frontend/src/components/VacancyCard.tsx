@@ -2,9 +2,10 @@ import { Link } from "react-router-dom";
 import type { FeedItem } from "@/api/types";
 import { Badge, Card } from "@/components/ui";
 import { formatDate, formatSalary, scoreTone } from "@/lib/format";
+import { respectTone, respectWord } from "@/lib/companyReview";
 
 export function VacancyCard({ item }: { item: FeedItem }) {
-  const { vacancy, reaction } = item;
+  const { vacancy, reaction, company_review } = item;
   const score = reaction?.score ?? null;
   return (
     <Link to={`/vacancies/${vacancy.id}`} className="block">
@@ -24,6 +25,16 @@ export function VacancyCard({ item }: { item: FeedItem }) {
         <div className="text-sm mt-1.5">
           {formatSalary(vacancy.salary_from, vacancy.salary_to, vacancy.salary_currency)}
         </div>
+        {company_review && company_review.review_count > 0 && (
+          <div className="mt-2">
+            <Badge tone={respectTone(company_review.respect_score)}>
+              🤝 {respectWord(company_review.respect_score)}
+              {company_review.respect_score !== null &&
+                ` · ${company_review.respect_score}`}
+              {` · ${company_review.review_count} отз.`}
+            </Badge>
+          </div>
+        )}
         <div className="flex items-center justify-between mt-2 text-xs text-tg-hint">
           <span>{formatDate(vacancy.published_at)}</span>
           {reaction?.reaction === "save" && <span>⭐ В избранном</span>}

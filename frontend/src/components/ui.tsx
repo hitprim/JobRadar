@@ -79,6 +79,34 @@ export function CenterLoader() {
   );
 }
 
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-tg-secondary-bg ${className}`} />;
+}
+
+/** Карточка-заглушка для списков (Feed/Tracker) во время загрузки. */
+export function SkeletonCard() {
+  return (
+    <div className="card space-y-3">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-5 w-24" />
+        <Skeleton className="h-4 w-16" />
+      </div>
+      <Skeleton className="h-4 w-3/4" />
+      <Skeleton className="h-4 w-1/2" />
+    </div>
+  );
+}
+
+export function SkeletonList({ count = 4 }: { count?: number }) {
+  return (
+    <div className="p-4 space-y-3">
+      {Array.from({ length: count }).map((_, i) => (
+        <SkeletonCard key={i} />
+      ))}
+    </div>
+  );
+}
+
 export function EmptyState({
   title,
   hint,

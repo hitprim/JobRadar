@@ -4,9 +4,17 @@ import { profilesApi } from "@/api/endpoints";
 import { toApiError } from "@/api/client";
 import { useAuth } from "@/store/auth";
 import { Button, Card, CenterLoader, PageError } from "@/components/ui";
-import type { ProfileGrade } from "@/api/types";
-
-const GRADES: ProfileGrade[] = ["junior", "middle", "senior", "lead"];
+import { ProfileSwitcher } from "@/components/ProfileSwitcher";
+import { ExpandableTextarea } from "@/components/ExpandableTextarea";
+import { toast } from "@/lib/toast";
+import { ProfileForm } from "@/components/ProfileForm";
+import {
+  emptyProfileForm,
+  isProfileFormValid,
+  profileFormFromProfile,
+  profileFormToPayload,
+  type ProfileFormValue,
+} from "@/lib/profileForm";
 
 export function ProfilePage() {
   const { user } = useAuth();
@@ -28,34 +36,27 @@ export function ProfilePage() {
     enabled: profileId !== null && profileId !== undefined,
   });
 
-  const [stack, setStack] = useState("");
-  const [grade, setGrade] = useState<ProfileGrade>("middle");
-  const [salaryFrom, setSalaryFrom] = useState("");
+  const [form, setForm] = useState<ProfileFormValue>(emptyProfileForm);
+  const patch = (p: Partial<ProfileFormValue>) => setForm((prev) => ({ ...prev, ...p }));
   const [resumeText, setResumeText] = useState("");
 
-  // Сихронизируем локальный стейт когда профиль загрузится
+  // Синхронизируем локальный стейт когда профиль загрузится.
   useEffect(() => {
-    if (profile.data) {
-      setStack(profile.data.stack.join(", "));
-      setGrade(profile.data.grade ?? "middle");
-      setSalaryFrom(profile.data.salary_from?.toString() ?? "");
-    }
+    if (profile.data) setForm(profileFormFromProfile(profile.data));
   }, [profile.data]);
 
   useEffect(() => {
-    if (resume.data) {
-      setResumeText(resume.data.resume_text ?? "");
-    }
+    if (resume.data) setResumeText(resume.data.resume_text ?? "");
   }, [resume.data]);
 
   const savePatch = useMutation({
     mutationFn: () =>
-      profilesApi.update(profileId!, {
-        stack: stack.split(",").map((s) => s.trim()).filter(Boolean),
-        grade,
-        salary_from: salaryFrom ? Number(salaryFrom) : null,
-      }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["profile", profileId] }),
+      profilesApi.update(profileId!, profileFormToPayload(form, profile.data!.name)),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["profile", profileId] });
+      toast.success("Сохранено");
+    },
+    onError: (e) => toast.error(toApiError(e).detail),
   });
 
   const saveResume = useMutation({
@@ -63,7 +64,9 @@ export function ProfilePage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["resume", profileId] });
       void qc.invalidateQueries({ queryKey: ["profile", profileId] });
+      toast.success("Резюме сохранено");
     },
+    onError: (e) => toast.error(toApiError(e).detail),
   });
 
   if (profile.isLoading) return <CenterLoader />;
@@ -72,62 +75,22 @@ export function ProfilePage() {
 
   return (
     <div className="p-4 space-y-4">
-      <h1 className="text-xl font-semibold">{profile.data.name}</h1>
-      <div className="text-tg-hint text-sm -mt-3">
+      <div className="text-tg-hint text-sm">
         @{user?.username ?? "—"} · {user?.first_name ?? ""}
       </div>
 
-      <Card className="space-y-3">
-        <div>
-          <label className="block text-sm mb-1">Стек</label>
-          <input
-            className="input"
-            value={stack}
-            onChange={(e) => setStack(e.target.value)}
-            placeholder="python, fastapi, ..."
-          />
-        </div>
-        <div>
-          <label className="block text-sm mb-1">Грейд</label>
-          <div className="flex gap-2">
-            {GRADES.map((g) => (
-              <button
-                key={g}
-                type="button"
-                onClick={() => setGrade(g)}
-                className={`flex-1 py-2 rounded-lg text-sm ${
-                  grade === g
-                    ? "bg-tg-btn text-tg-btn-text"
-                    : "bg-tg-bg border border-tg-secondary-bg"
-                }`}
-              >
-                {g}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <label className="block text-sm mb-1">Желаемая ЗП от</label>
-          <input
-            className="input"
-            type="number"
-            inputMode="numeric"
-            value={salaryFrom}
-            onChange={(e) => setSalaryFrom(e.target.value)}
-          />
-        </div>
+      <ProfileSwitcher />
+
+      <Card>
+        <ProfileForm value={form} onChange={patch} />
         <Button
-          className="w-full"
+          className="w-full mt-4"
           loading={savePatch.isPending}
+          disabled={!isProfileFormValid(form)}
           onClick={() => savePatch.mutate()}
         >
           Сохранить
         </Button>
-        {savePatch.isError && (
-          <div className="text-tg-destructive text-sm">
-            {toApiError(savePatch.error).detail}
-          </div>
-        )}
       </Card>
 
       <Card className="space-y-3">
@@ -136,14 +99,17 @@ export function ProfilePage() {
           Вставьте текст резюме — он будет использоваться для генерации
           сопроводительных и более точной оценки. Шифруется на сервере.
         </div>
-        <textarea
-          className="input min-h-[200px] text-sm"
+        <ExpandableTextarea
           value={resumeText}
-          onChange={(e) => setResumeText(e.target.value)}
+          onChange={setResumeText}
+          minHeightClass="min-h-[200px]"
+          title="Резюме"
           placeholder="Senior Python разработчик. 5 лет опыта..."
           maxLength={100000}
         />
-        <div className="text-xs text-tg-hint">{resumeText.length} символов</div>
+        <div className="text-xs text-tg-hint">
+          {resumeText.length} символов · ⛶ — редактировать на весь экран
+        </div>
         <Button
           variant="secondary"
           className="w-full"

@@ -4,8 +4,9 @@ import { applicationsApi, vacanciesApi } from "@/api/endpoints";
 import { ApiError, toApiError } from "@/api/client";
 import { useAuth } from "@/store/auth";
 import { Badge, Button, Card, CenterLoader, PageError } from "@/components/ui";
+import { CompanyReviewSection } from "@/components/CompanyReviewSection";
+import { toast } from "@/lib/toast";
 import { formatDate, formatSalary, scoreTone } from "@/lib/format";
-import { haptic } from "@/lib/telegram";
 
 export function VacancyDetailPage() {
   const { id: idStr } = useParams<{ id: string }>();
@@ -18,11 +19,17 @@ export function VacancyDetailPage() {
     queryKey: ["vacancy", vacancyId],
     queryFn: () => vacanciesApi.get(vacancyId),
     enabled: Number.isFinite(vacancyId),
+    // Описание грузится в фоне (Chrome ~минута). Пока backend отдаёт
+    // description_pending=true — опрашиваем повторно, потом останавливаемся.
+    refetchInterval: (query) =>
+      query.state.data?.description_pending ? 3000 : false,
   });
 
+  // reaction:"all" — нужна реакция именно этой вакансии, даже если она «скрыта»
+  // (skip) из основной ленты. Иначе кнопка «Скрыть» не подсветилась бы.
   const feed = useQuery({
-    queryKey: ["feed", profileId],
-    queryFn: () => vacanciesApi.feed(profileId!),
+    queryKey: ["feed", profileId, "all"],
+    queryFn: () => vacanciesApi.feed(profileId!, { reaction: "all" }),
     enabled: profileId !== null && profileId !== undefined,
   });
 
@@ -31,19 +38,27 @@ export function VacancyDetailPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["feed", profileId] }),
   });
 
+  const REACTION_LABEL: Record<"like" | "skip" | "save", string> = {
+    like: "Нравится",
+    save: "В избранном",
+    skip: "Скрыто",
+  };
+
   const react = useMutation({
     mutationFn: (r: "like" | "skip" | "save") =>
       vacanciesApi.react(vacancyId, profileId!, r),
-    onSuccess: () => {
-      haptic("light");
+    onSuccess: (_data, r) => {
       void qc.invalidateQueries({ queryKey: ["feed", profileId] });
+      toast.success(REACTION_LABEL[r]);
     },
+    onError: (e) => toast.error(toApiError(e).detail),
   });
 
   const apply = useMutation({
     mutationFn: () => applicationsApi.create(profileId!, { vacancy_id: vacancyId }),
     onSuccess: (app) => {
       void qc.invalidateQueries({ queryKey: ["applications", profileId] });
+      toast.success("Отклик добавлен в трекер");
       nav(`/tracker?application=${app.id}`);
     },
   });
@@ -130,29 +145,44 @@ export function VacancyDetailPage() {
       </Card>
 
       {/* Reactions */}
-      <div className="grid grid-cols-3 gap-2">
-        <Button
-          variant={feedItem?.reaction?.reaction === "like" ? "primary" : "secondary"}
-          onClick={() => react.mutate("like")}
-        >
-          👍
-        </Button>
-        <Button
-          variant={feedItem?.reaction?.reaction === "save" ? "primary" : "secondary"}
-          onClick={() => react.mutate("save")}
-        >
-          ⭐
-        </Button>
-        <Button
-          variant={feedItem?.reaction?.reaction === "skip" ? "primary" : "secondary"}
-          onClick={() => react.mutate("skip")}
-        >
-          ✕
-        </Button>
+      <div>
+        <div className="text-xs text-tg-hint mb-1.5">Ваша реакция</div>
+        <div className="grid grid-cols-3 gap-2">
+          <Button
+            variant={feedItem?.reaction?.reaction === "like" ? "primary" : "secondary"}
+            onClick={() => react.mutate("like")}
+          >
+            <span className="flex flex-col items-center leading-tight">
+              <span className="text-lg">👍</span>
+              <span className="text-xs">Нравится</span>
+            </span>
+          </Button>
+          <Button
+            variant={feedItem?.reaction?.reaction === "save" ? "primary" : "secondary"}
+            onClick={() => react.mutate("save")}
+          >
+            <span className="flex flex-col items-center leading-tight">
+              <span className="text-lg">⭐</span>
+              <span className="text-xs">В избранное</span>
+            </span>
+          </Button>
+          <Button
+            variant={feedItem?.reaction?.reaction === "skip" ? "primary" : "secondary"}
+            onClick={() => react.mutate("skip")}
+          >
+            <span className="flex flex-col items-center leading-tight">
+              <span className="text-lg">✕</span>
+              <span className="text-xs">Скрыть</span>
+            </span>
+          </Button>
+        </div>
+        <div className="text-xs text-tg-hint mt-1.5">
+          «Скрыть» убирает вакансию из ленты, «В избранное» — добавляет в отдельную вкладку.
+        </div>
       </div>
 
       {/* Description */}
-      {v.description && (
+      {v.description ? (
         <Card>
           <div className="text-sm font-medium mb-2">Описание</div>
           <div
@@ -160,7 +190,13 @@ export function VacancyDetailPage() {
             dangerouslySetInnerHTML={{ __html: v.description }}
           />
         </Card>
-      )}
+      ) : v.description_pending ? (
+        <Card>
+          <div className="text-sm text-tg-hint">
+            Загружаем описание с hh.ru… это занимает несколько секунд.
+          </div>
+        </Card>
+      ) : null}
 
       {v.key_skills.length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -169,6 +205,9 @@ export function VacancyDetailPage() {
           ))}
         </div>
       )}
+
+      {/* Отзывы о компании (об отношении к соискателям) */}
+      <CompanyReviewSection vacancyId={vacancyId} profileId={profileId} />
 
       {/* Letter + Apply CTA */}
       <div className="grid grid-cols-2 gap-2 pt-2">

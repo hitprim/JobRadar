@@ -1,5 +1,13 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { useBootstrapAuth } from "@/hooks/useAuth";
+import { useBackButton } from "@/hooks/useBackButton";
 import { useAuth } from "@/store/auth";
 import { CenterLoader, PageError } from "@/components/ui";
 import { Layout } from "@/components/Layout";
@@ -9,6 +17,18 @@ import { VacancyDetailPage } from "@/pages/VacancyDetail";
 import { LetterPage } from "@/pages/Letter";
 import { TrackerPage } from "@/pages/Tracker";
 import { ProfilePage } from "@/pages/Profile";
+
+// Корневые вкладки — отсюда системный «Назад» закрывает MiniApp (ожидаемо).
+const TAB_ROUTES = ["/feed", "/tracker", "/profile"];
+
+/** Связывает нативную кнопку «Назад» Telegram с роутером на не-корневых экранах. */
+function TelegramBackButton() {
+  const loc = useLocation();
+  const nav = useNavigate();
+  const isTab = TAB_ROUTES.includes(loc.pathname);
+  useBackButton(() => nav(-1), !isTab);
+  return null;
+}
 
 function ProtectedRoutes() {
   const profileId = useAuth((s) => s.user?.active_profile_id);
@@ -27,6 +47,8 @@ function ProtectedRoutes() {
         <Route path="/feed" element={<FeedPage />} />
         <Route path="/tracker" element={<TrackerPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        {/* Создание дополнительного профиля (мульти-профиль) */}
+        <Route path="/profiles/new" element={<OnboardingPage />} />
       </Route>
       {/* full-screen pages (без bottom-nav) */}
       <Route path="/vacancies/:id" element={<VacancyDetailPage />} />
@@ -42,6 +64,7 @@ export function App() {
   if (status === "error") return <PageError message={error ?? "Auth failed"} />;
   return (
     <BrowserRouter>
+      <TelegramBackButton />
       <ProtectedRoutes />
     </BrowserRouter>
   );

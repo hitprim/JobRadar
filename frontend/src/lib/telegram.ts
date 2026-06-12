@@ -5,6 +5,14 @@
  * Telegram (обычный браузер) — возвращаем null, фронт переключается на dev-auth.
  */
 
+export interface TgBackButton {
+  isVisible: boolean;
+  show: () => void;
+  hide: () => void;
+  onClick: (cb: () => void) => void;
+  offClick: (cb: () => void) => void;
+}
+
 export interface TgWebApp {
   initData: string;
   initDataUnsafe: { user?: { id: number; first_name?: string; username?: string } };
@@ -22,6 +30,7 @@ export interface TgWebApp {
   ready: () => void;
   expand: () => void;
   HapticFeedback?: { impactOccurred: (style: "light" | "medium" | "heavy") => void };
+  BackButton?: TgBackButton;
 }
 
 declare global {

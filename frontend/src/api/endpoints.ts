@@ -6,13 +6,20 @@
 import { apiClient } from "./client";
 import type {
   Application,
+  ApplicationListItem,
   ApplicationStatus,
   ApplicationStatusHistory,
+  CompanyReviewCreateRequest,
+  CompanyReviewReportResponse,
+  CompanyReviewView,
   FeedItem,
   FunnelStats,
   Letter,
   LetterGenerateResponse,
-  ParseResult,
+  LetterTemplate,
+  LetterTemplateCreateRequest,
+  LetterTemplatePatchRequest,
+  RefreshAccepted,
   Profile,
   ProfileCreateRequest,
   ProfileUpdateRequest,
@@ -67,15 +74,29 @@ export const sourcesApi = {
   remove: (sourceId: number) =>
     apiClient.delete<void>(`/sources/${sourceId}`).then((r) => r.data),
   refresh: (sourceId: number) =>
-    apiClient.post<ParseResult>(`/sources/${sourceId}/refresh`).then((r) => r.data),
+    apiClient
+      .post<RefreshAccepted>(`/sources/${sourceId}/refresh`)
+      .then((r) => r.data),
 };
 
 // ---- Vacancies / Feed ----
 
+export type FeedFilter = "like" | "save" | "skip" | "all";
+
 export const vacanciesApi = {
-  feed: (profileId: number, limit = 50, offset = 0) =>
+  feed: (
+    profileId: number,
+    params?: { reaction?: FeedFilter; limit?: number; offset?: number },
+  ) =>
     apiClient
-      .get<FeedItem[]>(`/profiles/${profileId}/feed`, { params: { limit, offset } })
+      .get<FeedItem[]>(`/profiles/${profileId}/feed`, {
+        params: {
+          limit: params?.limit ?? 50,
+          offset: params?.offset ?? 0,
+          // undefined → axios не добавит параметр (лента «Все» по умолчанию)
+          reaction: params?.reaction,
+        },
+      })
       .then((r) => r.data),
   get: (id: number) => apiClient.get<Vacancy>(`/vacancies/${id}`).then((r) => r.data),
   react: (vacancyId: number, profileId: number, reaction: "like" | "skip" | "save") =>
@@ -92,6 +113,48 @@ export const vacanciesApi = {
         params: { profile_id: profileId, force },
       })
       .then((r) => r.data),
+};
+
+// ---- Company reviews (отзывы о компаниях) ----
+
+export const companyReviewsApi = {
+  get: (vacancyId: number) =>
+    apiClient
+      .get<CompanyReviewView>(`/vacancies/${vacancyId}/company-review`)
+      .then((r) => r.data),
+  submit: (
+    vacancyId: number,
+    body: CompanyReviewCreateRequest,
+    profileId?: number,
+  ) =>
+    apiClient
+      .post<CompanyReviewView>(`/vacancies/${vacancyId}/company-review`, body, {
+        params: profileId !== undefined ? { profile_id: profileId } : undefined,
+      })
+      .then((r) => r.data),
+  report: (reviewId: number) =>
+    apiClient
+      .post<CompanyReviewReportResponse>(`/company-reviews/${reviewId}/report`)
+      .then((r) => r.data),
+};
+
+// ---- Letter templates (сохранённые шаблоны) ----
+
+export const letterTemplatesApi = {
+  list: (profileId: number) =>
+    apiClient
+      .get<LetterTemplate[]>(`/profiles/${profileId}/letter-templates`)
+      .then((r) => r.data),
+  create: (profileId: number, body: LetterTemplateCreateRequest) =>
+    apiClient
+      .post<LetterTemplate>(`/profiles/${profileId}/letter-templates`, body)
+      .then((r) => r.data),
+  update: (templateId: number, body: LetterTemplatePatchRequest) =>
+    apiClient
+      .patch<LetterTemplate>(`/letter-templates/${templateId}`, body)
+      .then((r) => r.data),
+  remove: (templateId: number) =>
+    apiClient.delete<void>(`/letter-templates/${templateId}`).then((r) => r.data),
 };
 
 // ---- Letters ----
@@ -119,7 +182,7 @@ export const lettersApi = {
 export const applicationsApi = {
   list: (profileId: number) =>
     apiClient
-      .get<Application[]>(`/profiles/${profileId}/applications`)
+      .get<ApplicationListItem[]>(`/profiles/${profileId}/applications`)
       .then((r) => r.data),
   create: (
     profileId: number,
@@ -146,4 +209,8 @@ export const applicationsApi = {
       .then((r) => r.data),
   funnel: (profileId: number) =>
     apiClient.get<FunnelStats>(`/profiles/${profileId}/funnel`).then((r) => r.data),
+  exportCsv: (profileId: number) =>
+    apiClient
+      .get(`/profiles/${profileId}/applications/export`, { responseType: "blob" })
+      .then((r) => r.data as Blob),
 };
