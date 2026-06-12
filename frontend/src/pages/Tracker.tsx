@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { applicationsApi } from "@/api/endpoints";
 import { toApiError } from "@/api/client";
@@ -95,9 +96,12 @@ function TrackerCard({
         <span className="text-xs text-tg-hint">{formatDateTime(app.created_at)}</span>
       </div>
 
-      <div className="mb-1 font-medium leading-snug">
-        {app.vacancy_title ?? `Вакансия #${app.vacancy_id}`}
-      </div>
+      <Link
+        to={`/vacancies/${app.vacancy_id}`}
+        className="block mb-1 font-medium leading-snug text-tg-link hover:opacity-80"
+      >
+        {app.vacancy_title ?? `Вакансия #${app.vacancy_id}`} ›
+      </Link>
       {app.company_name && (
         <div className="text-sm text-tg-hint mb-2">{app.company_name}</div>
       )}
