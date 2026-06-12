@@ -77,6 +77,37 @@ class Settings(BaseSettings):
     # Контактный email (требуется для User-Agent в запросах к hh.ru API)
     hh_user_agent_contact: str = "jobradar@example.com"
 
+    # --- Headless Chrome парсер (обход антибота, без CDP) ---
+    # Переключатель источника "hh": True → HhChromeSource (headless Chrome --dump-dom),
+    # False → старый HhSource (публичный API, сейчас отдаёт 403).
+    parser_use_chrome: bool = True
+    # Путь к бинарю Chrome/Chromium. Пусто → автоопределение по списку кандидатов.
+    # На Railway (Debian) обычно "/usr/bin/chromium".
+    chrome_binary: str = ""
+    # Базовый URL веб-морды hh.ru (НЕ api.). Отсюда строим /search/vacancy.
+    hh_web_base_url: str = "https://hh.ru"
+    # Сколько headless-Chrome процессов одновременно (память!). 1 страница ≈ 1 процесс.
+    parser_concurrency: int = 3
+    # Тайм-аут одного запуска Chrome (рендер SPA + dump). Kill по истечении.
+    # hh.ru — тяжёлая SPA; в контейнере (особенно Docker Desktop/WSL2) полный
+    # рендер выдачи занимает ~45-55s. 30s было мало → таймаут. Держим с запасом.
+    parser_chrome_timeout_seconds: float = 75.0
+    # virtual-time-budget для Chrome (мс) — сколько ждать выполнения JS перед дампом.
+    parser_chrome_virtual_time_ms: int = 8000
+    # Прокси для Chrome (--proxy-server). Пусто → без прокси (IP машины — потолок).
+    parser_proxy_server: str = ""
+    # Джиттер между страницами (сек) — рандомная задержка, чтобы не долбить ровным ритмом.
+    parser_jitter_min_seconds: float = 1.5
+    parser_jitter_max_seconds: float = 6.0
+    # Ретраи при блокировке/таймауте Chrome (экспоненциальный бэкофф).
+    parser_chrome_max_retries: int = 2
+
+    # --- Frontend (локальная раздача SPA самим backend'ом) ---
+    # Путь к собранному фронту (frontend/dist). Пусто → SPA НЕ раздаётся
+    # (в проде фронт на Cloudflare/Netlify, backend отдаёт только /api).
+    # Для локального ngrok-деплоя задаём путь — тогда один origin отдаёт и SPA, и API.
+    frontend_dist_path: str = ""
+
     # --- CORS ---
     # CSV-список origin'ов. В dev пустой → разрешаем всем ('*').
     # В prod обязателен непустой whitelist (валидируется при старте, см. ниже).

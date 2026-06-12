@@ -25,18 +25,22 @@ Endpoints v0.1:
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from sqlalchemy import text
 
 from src.api import applications as applications_router
 from src.api import auth as auth_router
 from src.api import billing as billing_router
+from src.api import company_reviews as company_reviews_router
+from src.api import letter_templates as letter_templates_router
 from src.api import letters as letters_router
 from src.api import profiles as profiles_router
 from src.api import sources as sources_router
@@ -107,5 +111,36 @@ app.include_router(profiles_router.router, prefix="/api/profiles", tags=["profil
 app.include_router(sources_router.router)
 app.include_router(vacancies_router.router)
 app.include_router(letters_router.router)
+app.include_router(letter_templates_router.router)
 app.include_router(applications_router.router)
+app.include_router(company_reviews_router.router)
 app.include_router(billing_router.router)
+
+
+# --- Опциональная раздача собранного SPA (локальный ngrok-деплой) ---
+# Если FRONTEND_DIST_PATH указывает на существующую папку — backend отдаёт
+# фронт с того же origin, что и /api (удобно для одного ngrok-туннеля).
+# В проде путь пустой → этот блок не активируется (фронт на Cloudflare/Netlify).
+_dist = settings.frontend_dist_path.strip()
+if _dist and os.path.isdir(_dist):
+    _assets_dir = os.path.join(_dist, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+    _index = os.path.join(_dist, "index.html")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_fallback(full_path: str) -> FileResponse:
+        """SPA-fallback: отдаём статфайл если есть, иначе index.html
+        (клиентский роутинг React Router). API-роуты зарегистрированы выше и
+        имеют приоритет.
+
+        Синхронный хендлер — FastAPI выполнит его в threadpool, поэтому
+        блокирующие os.path-проверки здесь безопасны (и не триггерят async-lint).
+        """
+        candidate = os.path.join(_dist, full_path)
+        if full_path and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(_index)
+
+    logger.bind(dist=_dist).info("SPA static serving enabled")

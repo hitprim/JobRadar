@@ -20,6 +20,8 @@ ProfileCategory = Literal["it", "finance", "sales", "medical", "service", "produ
 ProfileGrade = Literal["junior", "middle", "senior", "lead"]
 WorkFormat = Literal["remote", "hybrid", "office"]
 Schedule = Literal["fullDay", "shift", "flexible", "part"]
+# Уровни опыта hh.ru — явный фильтр поиска (отдельно от grade, который для скоринга).
+Experience = Literal["noExperience", "between1And3", "between3And6", "moreThan6"]
 
 
 class Profile(BaseModel):
@@ -38,6 +40,7 @@ class Profile(BaseModel):
     salary_currency: str
     work_format: list[WorkFormat] = Field(default_factory=list)
     schedule: list[Schedule] = Field(default_factory=list)
+    experience: list[Experience] = Field(default_factory=list)
     area_ids: list[int] = Field(default_factory=list)
     exclude_keywords: list[str] = Field(default_factory=list)
     has_resume: bool
@@ -59,6 +62,7 @@ class ProfileCreate(BaseModel):
     salary_currency: str = "RUR"
     work_format: list[WorkFormat] = Field(default_factory=list)
     schedule: list[Schedule] = Field(default_factory=list)
+    experience: list[Experience] = Field(default_factory=list)
     area_ids: list[int] = Field(default_factory=list)
     exclude_keywords: list[str] = Field(default_factory=list)
     category_data: dict[str, Any] | None = None
@@ -76,6 +80,7 @@ class ProfileUpdate(BaseModel):
     salary_currency: str | None = None
     work_format: list[WorkFormat] | None = None
     schedule: list[Schedule] | None = None
+    experience: list[Experience] | None = None
     area_ids: list[int] | None = None
     exclude_keywords: list[str] | None = None
     category_data: dict[str, Any] | None = None

@@ -455,3 +455,66 @@ class TestAuthRequired:
     async def test_funnel_without_auth(self, client: AsyncClient) -> None:
         r = await client.get("/api/profiles/1/funnel")
         assert r.status_code == 401
+
+    async def test_export_without_auth(self, client: AsyncClient) -> None:
+        r = await client.get("/api/profiles/1/applications/export")
+        assert r.status_code == 401
+
+
+# ============================================================================
+# CSV export
+# ============================================================================
+
+
+class TestExportCsv:
+    async def test_export_returns_csv_with_rows(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        token, _ = await login(client)
+        profile = await _setup_profile(client, token)
+        vacancy = await _seed_vacancy(db_session, title="Senior Python Dev")
+        await client.post(
+            f"/api/applications?profile_id={profile['id']}",
+            headers=auth_headers(token),
+            json={"vacancy_id": vacancy.id, "notes": "позвонить в пятницу"},
+        )
+
+        r = await client.get(
+            f"/api/profiles/{profile['id']}/applications/export",
+            headers=auth_headers(token),
+        )
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/csv")
+        assert "attachment" in r.headers["content-disposition"]
+        body = r.content.decode("utf-8-sig")
+        # Заголовок + данные вакансии/заметки.
+        assert "Вакансия" in body
+        assert "Senior Python Dev" in body
+        assert "Acme" in body
+        assert "позвонить в пятницу" in body
+        assert "Отправлено" in body  # статус sent → RU
+
+    async def test_export_empty_profile_returns_header_only(
+        self, client: AsyncClient
+    ) -> None:
+        token, _ = await login(client)
+        profile = await _setup_profile(client, token)
+        r = await client.get(
+            f"/api/profiles/{profile['id']}/applications/export",
+            headers=auth_headers(token),
+        )
+        assert r.status_code == 200
+        lines = [ln for ln in r.content.decode("utf-8-sig").splitlines() if ln.strip()]
+        assert len(lines) == 1  # только заголовок
+
+    async def test_export_other_user_404(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        token_a, _ = await login(client, telegram_id=1)
+        profile_a = await _setup_profile(client, token_a)
+        token_b, _ = await login(client, telegram_id=2)
+        r = await client.get(
+            f"/api/profiles/{profile_a['id']}/applications/export",
+            headers=auth_headers(token_b),
+        )
+        assert r.status_code == 404

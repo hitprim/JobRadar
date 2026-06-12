@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.schemas import (
+    CompanyReviewSummaryPublic,
     FeedItemPublic,
     ReactionRequest,
     ScoreResponse,
@@ -23,25 +24,77 @@ from src.api.schemas import (
     VacancyReactionPublic,
 )
 from src.db.repositories import (
+    CompanyReviewRepository,
     ProfileRepository,
     ReactionRepository,
     UserRepository,
     VacancyRepository,
 )
-from src.db.session import get_session
+from src.db.session import SessionMaker, get_session
+from src.domain.company_review import company_key_for
 from src.llm import LLMError, LLMProvider, get_llm_provider
 from src.security.deps import CurrentUserId
+from src.services.parser import get_source_impl
 from src.services.scoring import (
     ProfileNotAccessibleError,
     ScoringService,
     VacancyNotFoundError,
 )
 from src.sources.base import SourceError
-from src.sources.hh import HhSource
 
 router = APIRouter()
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+# vacancy_id, для которых прямо сейчас идёт фоновая подгрузка деталей —
+# чтобы повторные опросы клиента не плодили параллельные запуски Chrome.
+_details_in_progress: set[int] = set()
+
+
+async def _fetch_details_background(vacancy_id: int) -> None:
+    """Фоновая подгрузка описания/навыков со страницы /vacancy/{id} через Chrome.
+
+    Раньше это делалось синхронно прямо в GET — Chrome рендерит SPA hh.ru ~45-75с,
+    а клиент отваливался по таймауту (axios 30с). Теперь GET возвращается сразу с
+    description_pending=true, а описание дописывается здесь; клиент опрашивает
+    эндпоинт повторно. Своя сессия (request-сессия уже закрыта). Исключения не
+    должны течь из background task — логируем сами.
+    """
+    try:
+        async with SessionMaker() as session:
+            repo = VacancyRepository(session)
+            vacancy = await repo.get_by_id(vacancy_id)
+            if vacancy is None or vacancy.description is not None:
+                return
+            try:
+                details = await get_source_impl(vacancy.source_type).fetch_details(
+                    vacancy.external_id
+                )
+            except SourceError as exc:
+                # Транзиентная сетевая ошибка/челлендж — НЕ помечаем attempted,
+                # чтобы при следующем открытии можно было попробовать снова.
+                logger.bind(vacancy_id=vacancy_id, error=str(exc)).warning(
+                    "background fetch_details failed"
+                )
+                return
+            description = details.get("description") if details else None
+            skills = (details or {}).get("key_skills") or []
+            skills_list = [s["name"] for s in skills if isinstance(s, dict) and "name" in s]
+            # mark_attempted=True даже если описания нет — вакансия может быть в
+            # архиве; не дёргаем Chrome повторно на каждый просмотр.
+            await repo.update_details(
+                vacancy_id,
+                description=description,
+                key_skills=skills_list,
+                mark_attempted=True,
+            )
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001 — фон не должен падать молча
+        logger.bind(vacancy_id=vacancy_id).exception(
+            "background fetch_details crashed: {}", exc
+        )
+    finally:
+        _details_in_progress.discard(vacancy_id)
 
 
 @router.get(
@@ -55,14 +108,45 @@ async def get_feed(
     user_id: CurrentUserId,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    reaction: str | None = Query(
+        default=None,
+        pattern="^(like|save|skip|all)$",
+        description=(
+            "Фильтр ленты по реакции. Без значения — «Все» (скрыты пропущенные); "
+            "like/save/skip — только с этой реакцией; all — всё, включая пропущенные."
+        ),
+    ),
 ) -> list[FeedItemPublic]:
     profile = await ProfileRepository(session).get_by_id_for_user(profile_id, user_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="profile not found")
     items = await VacancyRepository(session).list_feed_for_profile(
-        profile_id, limit=limit, offset=offset
+        profile_id, limit=limit, offset=offset, reaction=reaction
     )
-    return [FeedItemPublic.model_validate(i.model_dump()) for i in items]
+
+    # Бейдж respect-score: один агрегатный запрос по company_key всех вакансий
+    # ленты (ключи считаем в Python — единый источник нормализации).
+    keys_by_vacancy: dict[int, str] = {}
+    for it in items:
+        key = company_key_for(it.vacancy.company_id, it.vacancy.company_name)
+        if key is not None:
+            keys_by_vacancy[it.vacancy.id] = key
+    summaries = await CompanyReviewRepository(session).summaries_for_keys(
+        list(set(keys_by_vacancy.values()))
+    )
+
+    result: list[FeedItemPublic] = []
+    for it in items:
+        public = FeedItemPublic.model_validate(it.model_dump())
+        key = keys_by_vacancy.get(it.vacancy.id)
+        summary = summaries.get(key) if key else None
+        if summary is not None and summary.review_count > 0:
+            public.company_review = CompanyReviewSummaryPublic(
+                respect_score=summary.respect_score,
+                review_count=summary.review_count,
+            )
+        result.append(public)
+    return result
 
 
 @router.get(
@@ -74,31 +158,32 @@ async def get_vacancy(
     vacancy_id: int,
     session: SessionDep,
     user_id: CurrentUserId,  # noqa: ARG001 — авторизация
+    background_tasks: BackgroundTasks,
 ) -> VacancyPublic:
-    """Детали вакансии. Если description пуст — пытаемся загрузить через
-    hh.ru on-demand (lazy fetch_details). Сетевые ошибки игнорируем
-    (отдаём то, что есть)."""
+    """Детали вакансии. Если description пуст — запускаем фоновую подгрузку с
+    hh.ru (Chrome) и сразу возвращаем description_pending=true. Клиент опрашивает
+    эндпоинт повторно, пока описание не появится. Так запрос не висит ~минуту и
+    не отваливается по таймауту."""
     repo = VacancyRepository(session)
     vacancy = await repo.get_by_id(vacancy_id)
     if vacancy is None:
         raise HTTPException(status_code=404, detail="vacancy not found")
 
-    if vacancy.description is None and vacancy.source_type == "hh":
-        try:
-            details = await HhSource().fetch_details(vacancy.external_id)
-        except SourceError as exc:
-            logger.bind(vacancy_id=vacancy_id, error=str(exc)).warning("lazy fetch_details failed")
-            details = None
-        if details is not None:
-            description = details.get("description")
-            skills = details.get("key_skills") or []
-            skills_list = [s["name"] for s in skills if isinstance(s, dict) and "name" in s]
-            await repo.update_details(vacancy_id, description=description, key_skills=skills_list)
-            await session.commit()
-            refreshed = await repo.get_by_id(vacancy_id)
-            assert refreshed is not None
-            vacancy = refreshed
-    return VacancyPublic.model_validate(vacancy)
+    description_pending = False
+    if (
+        vacancy.description is None
+        and vacancy.source_type == "hh"
+        and not await repo.was_details_attempted(vacancy_id)
+    ):
+        description_pending = True
+        # Не плодим параллельные Chrome на повторных опросах того же клиента.
+        if vacancy_id not in _details_in_progress:
+            _details_in_progress.add(vacancy_id)
+            background_tasks.add_task(_fetch_details_background, vacancy_id)
+
+    result = VacancyPublic.model_validate(vacancy)
+    result.description_pending = description_pending
+    return result
 
 
 @router.post(

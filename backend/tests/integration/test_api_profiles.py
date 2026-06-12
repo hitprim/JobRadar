@@ -82,8 +82,10 @@ class TestCreateProfile:
         assert user_orm is not None
         assert user_orm.active_profile_id == body["id"]
 
-    async def test_second_profile_returns_409(self, client: AsyncClient) -> None:
-        token, _ = await login(client)
+    async def test_second_profile_succeeds_and_becomes_active(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        token, user = await login(client)
         first = await client.post(
             "/api/profiles", headers=auth_headers(token), json=_basic_profile_payload()
         )
@@ -94,8 +96,37 @@ class TestCreateProfile:
             headers=auth_headers(token),
             json=_basic_profile_payload(name="AI Engineer"),
         )
-        assert second.status_code == 409
-        assert "one active profile" in second.json()["detail"].lower()
+        assert second.status_code == 201, second.text
+        # Новый профиль становится активным.
+        user_orm = await db_session.get(UserORM, user["id"])
+        await db_session.refresh(user_orm)
+        assert user_orm is not None
+        assert user_orm.active_profile_id == second.json()["id"]
+
+        # Оба профиля видны в списке.
+        listing = await client.get("/api/profiles", headers=auth_headers(token))
+        assert listing.status_code == 200
+        assert {p["name"] for p in listing.json()} == {"Backend", "AI Engineer"}
+
+    async def test_exceeding_profile_limit_returns_409(self, client: AsyncClient) -> None:
+        from src.services.profile import MAX_ACTIVE_PROFILES
+
+        token, _ = await login(client)
+        for i in range(MAX_ACTIVE_PROFILES):
+            r = await client.post(
+                "/api/profiles",
+                headers=auth_headers(token),
+                json=_basic_profile_payload(name=f"Profile {i}"),
+            )
+            assert r.status_code == 201, r.text
+
+        over = await client.post(
+            "/api/profiles",
+            headers=auth_headers(token),
+            json=_basic_profile_payload(name="One too many"),
+        )
+        assert over.status_code == 409
+        assert "active profiles" in over.json()["detail"].lower()
 
     async def test_invalid_category_rejected(self, client: AsyncClient) -> None:
         token, _ = await login(client)

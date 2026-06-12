@@ -2,7 +2,7 @@
 
 Endpoints:
     GET    /api/profiles              — список активных профилей юзера
-    POST   /api/profiles              — создать профиль (в v0.1: 409 если уже есть активный)
+    POST   /api/profiles              — создать профиль (409 при превышении лимита)
     PATCH  /api/profiles/{id}         — обновить (без resume)
     PUT    /api/profiles/{id}/resume  — обновить резюме (отдельно из-за размера)
     GET    /api/profiles/{id}/resume  — получить расшифрованное резюме
@@ -68,7 +68,7 @@ async def create_profile(
     except ProfileLimitReachedError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="only one active profile is allowed in v0.1",
+            detail=str(exc),
         ) from exc
     await session.commit()
     return ProfilePublic.model_validate(profile)

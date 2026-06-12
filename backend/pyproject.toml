@@ -27,6 +27,7 @@ dependencies = [
     "pyjwt>=2.10",
     # Scheduler
     "apscheduler>=3.10",
+    "selectolax>=0.4.10",
 ]
 
 [dependency-groups]

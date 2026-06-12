@@ -134,6 +134,57 @@ class NotificationsService:
             return False
 
     # ------------------------------------------------------------------
+    # Refresh result (ручной async-refresh ленты)
+    # ------------------------------------------------------------------
+    async def send_parse_result(
+        self, user_id: int, *, inserted: int, status: str, error: str | None = None
+    ) -> bool:
+        """Шлёт юзеру итог фонового refresh'а его источника.
+
+        user_id — внутренний id (users.id), резолвим telegram_id сами.
+        """
+        telegram_id = (
+            await self.session.execute(
+                select(UserORM.telegram_id).where(UserORM.id == user_id)
+            )
+        ).scalar_one_or_none()
+        if telegram_id is None:
+            return False
+
+        if status == "ok":
+            if inserted > 0:
+                text = (
+                    f"✅ Обновление завершено: найдено новых вакансий "
+                    f"<b>{inserted}</b>.\n\nОткройте ленту, чтобы посмотреть."
+                )
+            else:
+                text = (
+                    "✅ Обновление завершено: новых вакансий не найдено. "
+                    "Загляните позже."
+                )
+        elif status == "rate_limited":
+            text = (
+                "⚠️ Источник временно ограничил запросы (антибот). "
+                "Попробуйте обновить чуть позже."
+            )
+        else:
+            text = "❌ Не удалось обновить ленту. Попробуйте ещё раз позже."
+
+        bot = self._build_bot()
+        try:
+            await bot.send_message(
+                chat_id=telegram_id,
+                text=text,
+                reply_markup=_miniapp_keyboard(),
+            )
+            return True
+        except TelegramAPIError as exc:
+            logger.bind(user_id=user_id, error=str(exc)).warning(
+                "notifications: failed to send parse result"
+            )
+            return False
+
+    # ------------------------------------------------------------------
     # Reminders
     # ------------------------------------------------------------------
     async def find_pending_reminders(self, now: datetime | None = None) -> list[ReminderTask]:

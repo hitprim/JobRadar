@@ -17,6 +17,8 @@ from src.db.repositories.profile import ProfileRepository
 from src.domain.application import (
     Application,
     ApplicationCreate,
+    ApplicationExportRow,
+    ApplicationListItem,
     ApplicationStatusHistory,
     ApplicationUpdate,
     FunnelStats,
@@ -55,11 +57,13 @@ class ApplicationService:
         *,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[Application]:
+    ) -> list[ApplicationListItem]:
         profile = await self.profiles.get_by_id_for_user(profile_id, user_id)
         if profile is None:
             raise ProfileNotAccessibleError(f"profile {profile_id} not found")
-        return await self.applications.list_for_profile(profile_id, limit=limit, offset=offset)
+        return await self.applications.list_for_profile_enriched(
+            profile_id, limit=limit, offset=offset
+        )
 
     async def create_for_user(
         self, profile_id: int, user_id: int, data: ApplicationCreate
@@ -104,6 +108,14 @@ class ApplicationService:
         if profile is None:
             raise ProfileNotAccessibleError(f"profile {profile_id} not found")
         return await self.applications.funnel_for_profile(profile_id)
+
+    async def export_for_user_profile(
+        self, profile_id: int, user_id: int
+    ) -> list[ApplicationExportRow]:
+        profile = await self.profiles.get_by_id_for_user(profile_id, user_id)
+        if profile is None:
+            raise ProfileNotAccessibleError(f"profile {profile_id} not found")
+        return await self.applications.list_for_export(profile_id)
 
 
 # Re-export для удобства endpoint'а

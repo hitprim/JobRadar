@@ -39,3 +39,12 @@ class Source(ABC):
             SourceRateLimitedError: при 429.
             SourceError: для остальных ошибок (сеть, парсинг).
         """
+
+    async def fetch_details(self, external_id: str) -> dict[str, Any] | None:
+        """Опциональная on-demand подгрузка деталей вакансии (description,
+        key_skills) в форме {"description": str|None, "key_skills": [{"name": str}]}.
+
+        По умолчанию не реализовано (возвращает None). Источники, умеющие
+        тянуть детали, переопределяют метод.
+        """
+        return None

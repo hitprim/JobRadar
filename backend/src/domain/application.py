@@ -34,6 +34,30 @@ class Application(BaseModel):
     updated_at: datetime
 
 
+class ApplicationListItem(BaseModel):
+    """Application + поля вакансии (join) для списка в трекере.
+
+    Зачем: карточка трекера показывает заголовок/компанию вакансии, а не
+    «Вакансия #N». Вакансия джойнится в репозитории одним запросом.
+    """
+
+    model_config = ConfigDict(from_attributes=True, frozen=True)
+
+    id: int
+    profile_id: int
+    vacancy_id: int
+    status: ApplicationStatus
+    cover_letter: str | None
+    notes: str | None
+    next_reminder_at: datetime | None
+    reminder_sent_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    vacancy_title: str | None
+    company_name: str | None
+    vacancy_url: str | None
+
+
 class ApplicationStatusHistory(BaseModel):
     model_config = ConfigDict(from_attributes=True, frozen=True)
 
@@ -67,3 +91,18 @@ class FunnelStats(BaseModel):
     total: int
     counts: dict[str, int]  # status → count, все 6 статусов всегда (нули включены)
     conversion_rates: dict[str, float]  # status → % от sent (0.0..1.0)
+
+
+class ApplicationExportRow(BaseModel):
+    """Строка CSV-экспорта трекера: application + поля вакансии (join)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    application_id: int
+    status: ApplicationStatus
+    vacancy_title: str | None
+    company_name: str | None
+    vacancy_url: str | None
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from loguru import logger
 
+from src.config import settings
 from src.db.repositories.profile import ProfileRepository
 from src.db.repositories.source import SourceRepository
 from src.db.repositories.vacancy import VacancyRepository
@@ -21,6 +22,7 @@ from src.domain.source import ParseResult, Source
 from src.sources.base import Source as SourceImpl
 from src.sources.base import SourceError, SourceRateLimitedError
 from src.sources.hh import HhSource
+from src.sources.hh_chrome import HhChromeSource
 
 
 class ParserError(Exception):
@@ -38,10 +40,14 @@ class SourceNotFoundError(ParserError):
 def get_source_impl(source_type: str) -> SourceImpl:
     """Фабрика: по строковому типу даёт реализацию Source.
 
+    Для "hh" по умолчанию используется HhChromeSource (headless Chrome), т.к.
+    публичный API hh.ru закрыт для анонимов с 15.12.2025. Старый HhSource (API)
+    остаётся как аварийный путь под флагом PARSER_USE_CHROME=false.
+
     В v0.2 добавятся "habr", "avito" и т.п.
     """
     if source_type == "hh":
-        return HhSource()
+        return HhChromeSource() if settings.parser_use_chrome else HhSource()
     raise UnsupportedSourceTypeError(f"source type '{source_type}' not implemented in v0.1")
 
 
@@ -110,6 +116,9 @@ class ParserService:
             )
 
         inserted, updated = await self.vacancies.upsert_many(parsed)
+        # Заменяем набор вакансий источника на свежий результат: лента покажет
+        # только эту выдачу, а не накопленное старьё (важно при смене фильтров).
+        await self.vacancies.set_source_links(source.id, parsed)
         await self.sources.update_parse_status(
             source.id, status="ok", vacancies_today_delta=inserted
         )

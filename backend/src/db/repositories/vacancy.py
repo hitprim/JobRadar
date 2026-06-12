@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from src.db.models import Source as SourceORM
+from src.db.models import SourceVacancy as SourceVacancyORM
 from src.db.models import Vacancy as VacancyORM
 from src.db.models import VacancyReaction as ReactionORM
 from src.db.repositories.base import BaseRepository
@@ -133,8 +135,14 @@ class VacancyRepository(BaseRepository):
         *,
         description: str | None,
         key_skills: list[str] | None,
+        mark_attempted: bool = False,
     ) -> None:
-        """Дозаписывает description и key_skills (на on-demand fetch_details)."""
+        """Дозаписывает description и key_skills (на on-demand fetch_details).
+
+        mark_attempted=True ставит в raw_data флаг details_fetched, чтобы повторные
+        открытия вакансии не дёргали Chrome снова (даже если описания у вакансии
+        нет — например, она в архиве).
+        """
         orm = await self.session.get(VacancyORM, vacancy_id)
         if orm is None:
             return
@@ -142,35 +150,97 @@ class VacancyRepository(BaseRepository):
             orm.description = description
         if key_skills is not None:
             orm.key_skills = key_skills or None
+        if mark_attempted:
+            data = dict(orm.raw_data or {})
+            data["details_fetched"] = True
+            orm.raw_data = data
+
+    async def was_details_attempted(self, vacancy_id: int) -> bool:
+        """True, если детальную страницу уже пытались подгрузить (см. update_details)."""
+        orm = await self.session.get(VacancyORM, vacancy_id)
+        if orm is None:
+            return False
+        return bool((orm.raw_data or {}).get("details_fetched"))
+
+    async def set_source_links(
+        self, source_id: int, items: list[ParsedVacancy]
+    ) -> None:
+        """Полностью заменяет набор вакансий источника на свежий результат парсинга.
+
+        Вызывается после upsert_many: все items уже есть в vacancies, остаётся
+        связать их с источником, предварительно стерев прежние связи. Так лента
+        показывает только последнюю выдачу (refresh = замена, не накопление).
+        """
+        await self.session.execute(
+            delete(SourceVacancyORM).where(SourceVacancyORM.source_id == source_id)
+        )
+        if not items:
+            return
+        # Резолвим id вакансий по (source_type, external_id).
+        by_type: dict[str, set[str]] = {}
+        for it in items:
+            by_type.setdefault(it.source_type, set()).add(it.external_id)
+        vacancy_ids: list[int] = []
+        for src_type, ext_ids in by_type.items():
+            stmt = select(VacancyORM.id).where(
+                VacancyORM.source_type == src_type,
+                VacancyORM.external_id.in_(ext_ids),
+            )
+            vacancy_ids.extend(r[0] for r in (await self.session.execute(stmt)).all())
+        if vacancy_ids:
+            await self.session.execute(
+                pg_insert(SourceVacancyORM)
+                .values([{"source_id": source_id, "vacancy_id": vid} for vid in vacancy_ids])
+                .on_conflict_do_nothing()
+            )
 
     async def list_feed_for_profile(
-        self, profile_id: int, *, limit: int = 20, offset: int = 0
+        self,
+        profile_id: int,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        reaction: str | None = None,
     ) -> list[FeedItem]:
-        """Лента: все вакансии того же source_type что у источников профиля,
-        отсортированы по published_at DESC. Реакции подтягиваем left-join.
+        """Лента: вакансии из ПОСЛЕДНЕГО результата парсинга источников профиля.
 
-        В v0.1 source_type='hh' для всех профилей. Если у профиля несколько
-        источников разных типов — берём все их вакансии.
+        Набор задаётся таблицей source_vacancies (заменяется при каждом refresh),
+        поэтому смена фильтров + «Обновить» обновляет ленту целиком, а не
+        накапливает старое поверх нового. Реакции подтягиваем left-join.
+
+        Фильтр по реакции (`reaction`):
+        - None  → «Все»: скрываем пропущенные (skip), показываем остальное;
+        - "all" → вообще всё, включая пропущенные (нужно странице вакансии,
+                  чтобы найти свою реакцию независимо от фильтра ленты);
+        - "like" / "save" / "skip" → только вакансии с этой реакцией.
         """
-        from src.db.models import Source as SourceORM
-
-        # Сначала получаем source_types профиля
-        st_stmt = select(SourceORM.type).where(
-            SourceORM.profile_id == profile_id, SourceORM.is_active.is_(True)
+        # id вакансий, входящих в актуальную выдачу активных источников профиля.
+        # distinct — если несколько источников вернули одну вакансию.
+        vac_ids_subq = (
+            select(SourceVacancyORM.vacancy_id)
+            .join(SourceORM, SourceORM.id == SourceVacancyORM.source_id)
+            .where(SourceORM.profile_id == profile_id, SourceORM.is_active.is_(True))
+            .distinct()
+            .subquery()
         )
-        source_types = [r[0] for r in (await self.session.execute(st_stmt)).all()]
-        if not source_types:
-            return []
 
-        # Основной запрос с outer join на reactions
         stmt = (
             select(VacancyORM, ReactionORM)
+            .join(vac_ids_subq, vac_ids_subq.c.vacancy_id == VacancyORM.id)
             .outerjoin(
                 ReactionORM,
                 (ReactionORM.vacancy_id == VacancyORM.id) & (ReactionORM.profile_id == profile_id),
             )
-            .where(VacancyORM.source_type.in_(source_types))
-            .order_by(VacancyORM.published_at.desc().nulls_last(), VacancyORM.id.desc())
+        )
+        if reaction is None:
+            # «Все» — прячем пропущенные. NULL (нет реакции) остаётся в ленте.
+            stmt = stmt.where(
+                (ReactionORM.reaction.is_(None)) | (ReactionORM.reaction != "skip")
+            )
+        elif reaction != "all":
+            stmt = stmt.where(ReactionORM.reaction == reaction)
+        stmt = (
+            stmt.order_by(VacancyORM.published_at.desc().nulls_last(), VacancyORM.id.desc())
             .limit(limit)
             .offset(offset)
         )

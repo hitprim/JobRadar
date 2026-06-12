@@ -117,15 +117,32 @@ class TestSourcesCrud:
         assert r.status_code == 404
 
 
+class _FakeBot:
+    """Мок aiogram.Bot — глотает send_message без сети."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def send_message(self, *, chat_id: int, text: str, reply_markup=None) -> None:  # noqa: ANN001
+        self.sent.append({"chat_id": chat_id, "text": text})
+
+    class _Session:
+        async def close(self) -> None: ...
+
+    @property
+    def session(self) -> _Session:
+        return _FakeBot._Session()
+
+
 class TestRefreshSource:
-    async def test_refresh_with_mock_source(
+    async def test_refresh_starts_background_parse(
         self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Подменяем фабрику get_source_impl на mock, возвращающий 2 ParsedVacancy.
+        """Refresh теперь async: 202 сразу, парсинг + пуш — в фоне.
 
-        Так избегаем сетевых вызовов к hh.ru.
+        Под ASGITransport background task успевает отработать до возврата ответа,
+        поэтому после POST данные уже в БД. Source-impl и Bot мокаем.
         """
-        # Mock-Source
         from src.sources.base import Source as SourceImpl
 
         class _MockSource(SourceImpl):
@@ -148,8 +165,11 @@ class TestRefreshSource:
                 ]
 
         import src.services.parser as parser_module
+        from src.services.notifications import NotificationsService
 
         monkeypatch.setattr(parser_module, "get_source_impl", lambda _: _MockSource())
+        fake_bot = _FakeBot()
+        monkeypatch.setattr(NotificationsService, "_build_bot", lambda self: fake_bot)
 
         # Полный flow: login → profile → source → refresh
         token, _ = await login(client)
@@ -163,17 +183,25 @@ class TestRefreshSource:
         ).json()
 
         r = await client.post(f"/api/sources/{created['id']}/refresh", headers=auth_headers(token))
-        assert r.status_code == 200, r.text
+        assert r.status_code == 202, r.text
         body = r.json()
-        assert body["fetched"] == 2
-        assert body["inserted"] == 2
-        assert body["updated"] == 0
-        assert body["status"] == "ok"
+        assert body["source_id"] == created["id"]
+        assert body["status"] == "started"
 
-        # Повторный refresh — все 2 уже в БД, должны быть updated
-        r = await client.post(f"/api/sources/{created['id']}/refresh", headers=auth_headers(token))
-        body = r.json()
-        assert body["fetched"] == 2
-        assert body["inserted"] == 0
-        assert body["updated"] == 2
-        assert body["status"] == "ok"
+        # Фоновая задача отработала: источник в статусе ok, юзеру ушёл пуш.
+        sources = (
+            await client.get(
+                f"/api/profiles/{profile['id']}/sources", headers=auth_headers(token)
+            )
+        ).json()
+        assert sources[0]["last_status"] == "ok"
+        assert sources[0]["vacancies_today"] == 2
+        assert len(fake_bot.sent) == 1
+        assert "2" in fake_bot.sent[0]["text"]
+
+    async def test_refresh_unknown_source_404(
+        self, client: AsyncClient
+    ) -> None:
+        token, _ = await login(client)
+        r = await client.post("/api/sources/999999/refresh", headers=auth_headers(token))
+        assert r.status_code == 404

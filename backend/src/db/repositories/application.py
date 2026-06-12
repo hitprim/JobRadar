@@ -14,6 +14,8 @@ from src.domain.application import (
     APPLICATION_STATUSES,
     Application,
     ApplicationCreate,
+    ApplicationExportRow,
+    ApplicationListItem,
     ApplicationStatusHistory,
     ApplicationUpdate,
     FunnelStats,
@@ -87,6 +89,71 @@ class ApplicationRepository(BaseRepository):
         )
         result = await self.session.execute(stmt)
         return [_to_domain(orm) for orm in result.scalars().all()]
+
+    async def list_for_profile_enriched(
+        self, profile_id: int, *, limit: int = 100, offset: int = 0
+    ) -> list[ApplicationListItem]:
+        """Список откликов профиля + поля вакансии (join) для трекера."""
+        stmt = (
+            select(
+                ApplicationORM,
+                VacancyORM.title,
+                VacancyORM.company_name,
+                VacancyORM.url,
+            )
+            .join(VacancyORM, ApplicationORM.vacancy_id == VacancyORM.id)
+            .where(ApplicationORM.profile_id == profile_id)
+            .order_by(ApplicationORM.created_at.desc(), ApplicationORM.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            ApplicationListItem(
+                id=app.id,
+                profile_id=app.profile_id,
+                vacancy_id=app.vacancy_id,
+                status=app.status,
+                cover_letter=app.cover_letter,
+                notes=app.notes,
+                next_reminder_at=app.next_reminder_at,
+                reminder_sent_at=app.reminder_sent_at,
+                created_at=app.created_at,
+                updated_at=app.updated_at,
+                vacancy_title=title,
+                company_name=company_name,
+                vacancy_url=url,
+            )
+            for app, title, company_name, url in rows
+        ]
+
+    async def list_for_export(self, profile_id: int) -> list[ApplicationExportRow]:
+        """Все отклики профиля + поля вакансии (join) для CSV-экспорта."""
+        stmt = (
+            select(
+                ApplicationORM,
+                VacancyORM.title,
+                VacancyORM.company_name,
+                VacancyORM.url,
+            )
+            .join(VacancyORM, ApplicationORM.vacancy_id == VacancyORM.id)
+            .where(ApplicationORM.profile_id == profile_id)
+            .order_by(ApplicationORM.created_at.desc(), ApplicationORM.id.desc())
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            ApplicationExportRow(
+                application_id=app.id,
+                status=app.status,
+                vacancy_title=title,
+                company_name=company_name,
+                vacancy_url=url,
+                notes=app.notes,
+                created_at=app.created_at,
+                updated_at=app.updated_at,
+            )
+            for app, title, company_name, url in rows
+        ]
 
     async def vacancy_exists(self, vacancy_id: int) -> bool:
         stmt = select(VacancyORM.id).where(VacancyORM.id == vacancy_id)

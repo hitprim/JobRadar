@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.domain.profile import (
+    Experience,
     ProfileCategory,
     ProfileGrade,
     Schedule,
@@ -69,6 +70,7 @@ class ProfilePublic(BaseModel):
     salary_currency: str
     work_format: list[WorkFormat]
     schedule: list[Schedule]
+    experience: list[Experience]
     area_ids: list[int]
     exclude_keywords: list[str]
     has_resume: bool
@@ -88,6 +90,7 @@ class ProfileCreateRequest(BaseModel):
     salary_currency: str = "RUR"
     work_format: list[WorkFormat] = Field(default_factory=list)
     schedule: list[Schedule] = Field(default_factory=list)
+    experience: list[Experience] = Field(default_factory=list)
     area_ids: list[int] = Field(default_factory=list, max_length=50)
     exclude_keywords: list[str] = Field(default_factory=list, max_length=50)
     category_data: dict[str, Any] | None = None
@@ -105,6 +108,7 @@ class ProfileUpdateRequest(BaseModel):
     salary_currency: str | None = None
     work_format: list[WorkFormat] | None = None
     schedule: list[Schedule] | None = None
+    experience: list[Experience] | None = None
     area_ids: list[int] | None = Field(default=None, max_length=50)
     exclude_keywords: list[str] | None = Field(default=None, max_length=50)
     category_data: dict[str, Any] | None = None
@@ -151,6 +155,13 @@ class ParseResultPublic(BaseModel):
     error: str | None = None
 
 
+class RefreshAcceptedPublic(BaseModel):
+    """Ответ async-refresh: парсинг запущен в фоне, результат придёт пушем."""
+
+    source_id: int
+    status: str = "started"
+
+
 # ============================================================================
 # Vacancies + Feed
 # ============================================================================
@@ -176,6 +187,9 @@ class VacancyPublic(BaseModel):
     key_skills: list[str]
     published_at: datetime | None
     parsed_at: datetime
+    # True → описание ещё подгружается в фоне (Chrome), клиенту стоит опросить
+    # эндпоинт повторно. False → описание актуально (есть либо его нет вовсе).
+    description_pending: bool = False
 
 
 class VacancyReactionPublic(BaseModel):
@@ -191,6 +205,9 @@ class VacancyReactionPublic(BaseModel):
 class FeedItemPublic(BaseModel):
     vacancy: VacancyPublic
     reaction: VacancyReactionPublic | None
+    # Агрегат отзывов о компании (для бейджа respect-score). None — если у
+    # компании ещё нет отзывов или её нельзя идентифицировать.
+    company_review: CompanyReviewSummaryPublic | None = None
 
 
 class ReactionRequest(BaseModel):
@@ -242,6 +259,32 @@ class LetterPatchRequest(BaseModel):
 
 
 # ============================================================================
+# Letter templates (сохранённые шаблоны)
+# ============================================================================
+
+
+class LetterTemplatePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    title: str
+    body: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class LetterTemplateCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1, max_length=5000)
+
+
+class LetterTemplatePatchRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    body: str | None = Field(default=None, min_length=1, max_length=5000)
+
+
+# ============================================================================
 # Applications (Tracker)
 # ============================================================================
 
@@ -259,6 +302,26 @@ class ApplicationPublic(BaseModel):
     reminder_sent_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class ApplicationListItemPublic(BaseModel):
+    """Элемент списка трекера: application + заголовок/компания/ссылка вакансии."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    vacancy_id: int
+    status: str
+    cover_letter: str | None
+    notes: str | None
+    next_reminder_at: datetime | None
+    reminder_sent_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    vacancy_title: str | None
+    company_name: str | None
+    vacancy_url: str | None
 
 
 class ApplicationCreateRequest(BaseModel):
@@ -293,5 +356,68 @@ class FunnelPublic(BaseModel):
     conversion_rates: dict[str, float]
 
 
-# Resolve forward ref
+# ============================================================================
+# Company reviews (отзывы о компаниях об отношении к соискателям)
+# ============================================================================
+
+_RESPONDED_PATTERN = r"^(fast|slow|ignored)$"
+_RESPECT_PATTERN = r"^(respectful|neutral|dismissive)$"
+_FEEDBACK_PATTERN = r"^(detailed|formal|none)$"
+_HONESTY_PATTERN = r"^(matched|minor|mismatch)$"
+_PROCESS_PATTERN = r"^(smooth|tolerable|draining)$"
+
+
+class CompanyReviewCreateRequest(BaseModel):
+    responded: str = Field(pattern=_RESPONDED_PATTERN)
+    respect: str = Field(pattern=_RESPECT_PATTERN)
+    feedback: str = Field(pattern=_FEEDBACK_PATTERN)
+    honesty: str = Field(pattern=_HONESTY_PATTERN)
+    process: str = Field(pattern=_PROCESS_PATTERN)
+    text: str | None = Field(default=None, max_length=2000)
+
+
+class CompanyReviewPublic(BaseModel):
+    """Один отзыв. Без user_id — отзывы анонимны для читателей."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    responded: str
+    respect: str
+    feedback: str
+    honesty: str
+    process: str
+    text: str | None
+    score: int
+    created_at: datetime
+
+
+class CompanyReviewSummaryPublic(BaseModel):
+    """Краткий агрегат для бейджа (в ленте/на карточке)."""
+
+    respect_score: int | None
+    review_count: int
+
+
+class CompanyReviewReportResponse(BaseModel):
+    """Результат жалобы на отзыв."""
+
+    report_count: int
+    hidden: bool
+
+
+class CompanyReviewViewPublic(BaseModel):
+    """Полный взгляд на отзывы компании для экрана вакансии."""
+
+    company_key: str | None
+    company_name: str | None
+    respect_score: int | None
+    review_count: int
+    can_review: bool
+    my_review: CompanyReviewPublic | None
+    reviews: list[CompanyReviewPublic]
+
+
+# Resolve forward refs
 TelegramAuthResponse.model_rebuild()
+FeedItemPublic.model_rebuild()

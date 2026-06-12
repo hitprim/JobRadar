@@ -1,8 +1,8 @@
 """Profile-service: CRUD профилей.
 
-Бизнес-правила v0.1:
-- Один активный профиль на юзера (POST → 409 если уже есть).
-- При создании первого профиля сразу выставляем users.active_profile_id.
+Бизнес-правила:
+- До MAX_ACTIVE_PROFILES активных профилей на юзера (POST → 409 при превышении).
+- Новый профиль сразу делаем активным (users.active_profile_id).
 - При soft-delete активного → active_profile_id = NULL.
 """
 
@@ -18,7 +18,7 @@ class ProfileServiceError(Exception):
 
 
 class ProfileLimitReachedError(ProfileServiceError):
-    """В v0.1 — больше одного активного профиля на юзера нельзя."""
+    """Достигнут потолок активных профилей на юзера (MAX_ACTIVE_PROFILES)."""
 
 
 class ProfileNotFoundError(ProfileServiceError):
@@ -37,6 +37,10 @@ class ResumeTooLongError(ProfileServiceError):
 # с большим запасом (типовое CV в UTF-8 — 5-20KB).
 MAX_RESUME_LENGTH = 100_000
 
+# Потолок активных профилей на юзера. Защита от абуза/раздувания;
+# для реальных сценариев (Backend + AI Engineer + ...) 5 более чем достаточно.
+MAX_ACTIVE_PROFILES = 5
+
 
 class ProfileService:
     def __init__(self, profiles: ProfileRepository, users: UserRepository) -> None:
@@ -47,13 +51,14 @@ class ProfileService:
         return await self.profiles.list_active_for_user(user_id)
 
     async def create_for_user(self, user_id: int, data: ProfileCreate) -> Profile:
-        # v0.1: больше одного активного профиля нельзя
         existing_count = await self.profiles.count_active_for_user(user_id)
-        if existing_count >= 1:
-            raise ProfileLimitReachedError("Only one active profile is allowed in v0.1")
+        if existing_count >= MAX_ACTIVE_PROFILES:
+            raise ProfileLimitReachedError(
+                f"Maximum {MAX_ACTIVE_PROFILES} active profiles allowed"
+            )
 
         profile = await self.profiles.create(user_id, data)
-        # При создании первого профиля — делаем его активным
+        # Новый профиль сразу делаем активным — юзер хочет начать им пользоваться.
         await self.users.set_active_profile(user_id, profile.id)
         return profile
 

@@ -6,6 +6,16 @@ a candidate profile.
 Read the candidate profile and the job posting (both wrapped in `<user_input>` tags).
 Produce a JSON object with four fields: `score`, `reason`, `red_flags`, `green_flags`.
 
+## Judging seniority / grade (important)
+
+The vacancy's `experience` field comes from the job board and is **unreliable** —
+employers often tag a real mid/senior role as "no experience" to widen their funnel.
+Infer the real level from the **title** and **description** instead, and **on
+conflict trust the title** (e.g. title "Middle …" + experience "no experience" →
+treat as middle). Score grade-alignment against this inferred level vs the
+candidate's `grade`, not against the raw tag, and mention a clear mismatch in
+`reason`.
+
 ## Scoring rubric (0–100)
 
 - **80–100** — strong match across responsibilities, level, and compensation.

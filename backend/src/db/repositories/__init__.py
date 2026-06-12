@@ -8,7 +8,9 @@
 """
 
 from src.db.repositories.application import ApplicationRepository
+from src.db.repositories.company_review import CompanyReviewRepository
 from src.db.repositories.letter import LetterRepository
+from src.db.repositories.letter_template import LetterTemplateRepository
 from src.db.repositories.profile import ProfileRepository
 from src.db.repositories.reaction import ReactionRepository
 from src.db.repositories.source import SourceRepository
@@ -17,7 +19,9 @@ from src.db.repositories.vacancy import VacancyRepository
 
 __all__ = [
     "ApplicationRepository",
+    "CompanyReviewRepository",
     "LetterRepository",
+    "LetterTemplateRepository",
     "ProfileRepository",
     "ReactionRepository",
     "SourceRepository",

@@ -16,10 +16,16 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.7 /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
-# Минимальные пакеты для healthcheck и psql-клиента (release-cmd для migrations)
+# Пакеты:
+# - curl, ca-certificates — healthcheck + миграции
+# - chromium — headless-браузер для парсера hh.ru (--dump-dom, обход антибота).
+#   Системный Chromium на Debian ставится в /usr/bin/chromium и тянет нужные libs.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && apt-get install -y --no-install-recommends curl ca-certificates chromium \
     && rm -rf /var/lib/apt/lists/*
+
+# Путь к Chromium для парсера (src/sources/hh_chrome.py читает CHROME_BINARY).
+ENV CHROME_BINARY=/usr/bin/chromium
 
 # 1) Сначала манифесты — кэшируем слой с зависимостями
 COPY pyproject.toml uv.lock .python-version ./

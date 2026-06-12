@@ -11,13 +11,17 @@ Endpoints:
 
 from __future__ import annotations
 
+import csv
+import io
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.schemas import (
     ApplicationCreateRequest,
+    ApplicationListItemPublic,
     ApplicationPatchRequest,
     ApplicationPublic,
     ApplicationStatusHistoryPublic,
@@ -43,6 +47,16 @@ router = APIRouter()
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
+# Человекочитаемые статусы для CSV (совпадают с APPLICATION_STATUS_RU на фронте).
+_STATUS_RU: dict[str, str] = {
+    "sent": "Отправлено",
+    "hr": "HR",
+    "tech": "Тех. интервью",
+    "final": "Финал",
+    "offer": "Оффер",
+    "reject": "Отказ",
+}
+
 
 def _service(session: AsyncSession) -> ApplicationService:
     return ApplicationService(ApplicationRepository(session), ProfileRepository(session))
@@ -50,7 +64,7 @@ def _service(session: AsyncSession) -> ApplicationService:
 
 @router.get(
     "/api/profiles/{profile_id}/applications",
-    response_model=list[ApplicationPublic],
+    response_model=list[ApplicationListItemPublic],
     tags=["applications"],
 )
 async def list_applications(
@@ -59,14 +73,57 @@ async def list_applications(
     user_id: CurrentUserId,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-) -> list[ApplicationPublic]:
+) -> list[ApplicationListItemPublic]:
     try:
         items = await _service(session).list_for_user_profile(
             profile_id, user_id, limit=limit, offset=offset
         )
     except ProfileNotAccessibleError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return [ApplicationPublic.model_validate(a) for a in items]
+    return [ApplicationListItemPublic.model_validate(a) for a in items]
+
+
+@router.get(
+    "/api/profiles/{profile_id}/applications/export",
+    tags=["applications"],
+    summary="Экспорт трекера в CSV",
+)
+async def export_applications(
+    profile_id: int, session: SessionDep, user_id: CurrentUserId
+) -> Response:
+    try:
+        rows = await _service(session).export_for_user_profile(profile_id, user_id)
+    except ProfileNotAccessibleError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        ["ID", "Статус", "Вакансия", "Компания", "Ссылка", "Заметки", "Создано", "Обновлено"]
+    )
+    for r in rows:
+        writer.writerow(
+            [
+                r.application_id,
+                _STATUS_RU.get(r.status, r.status),
+                r.vacancy_title or "",
+                r.company_name or "",
+                r.vacancy_url or "",
+                r.notes or "",
+                r.created_at.isoformat(),
+                r.updated_at.isoformat(),
+            ]
+        )
+
+    # utf-8-sig (BOM) — чтобы Excel на Windows корректно открыл кириллицу.
+    content = buf.getvalue().encode("utf-8-sig")
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="jobradar_tracker_{profile_id}.csv"'
+        },
+    )
 
 
 @router.post(

@@ -8,6 +8,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.db.models import SourceVacancy as SourceVacancyORM
 from src.db.models import Vacancy as VacancyORM
 from src.llm import get_llm_provider
 from src.main import app
@@ -144,12 +145,17 @@ class TestScoreEndpoint:
         token, _ = await login(client)
         profile = await _setup_profile(client, token)
         # источник нужен чтобы вакансия попала в feed
-        await client.post(
-            f"/api/profiles/{profile['id']}/sources",
-            headers=auth_headers(token),
-            json={"type": "hh"},
-        )
+        source = (
+            await client.post(
+                f"/api/profiles/{profile['id']}/sources",
+                headers=auth_headers(token),
+                json={"type": "hh"},
+            )
+        ).json()
         vacancy = await _seed_vacancy(db_session)
+        # Лента берёт вакансии из source_vacancies — связываем вручную
+        db_session.add(SourceVacancyORM(source_id=source["id"], vacancy_id=vacancy.id))
+        await db_session.commit()
 
         # Скорим
         await client.post(

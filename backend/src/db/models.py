@@ -114,6 +114,9 @@ class Profile(Base):
     schedule: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     area_ids: Mapped[list[int] | None] = mapped_column(ARRAY(Integer))
     exclude_keywords: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    # Явный фильтр по опыту для поиска (значения hh:
+    # noExperience | between1And3 | between3And6 | moreThan6). Пусто = не фильтруем.
+    experience: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
 
     # Резюме: nonce(12) || ciphertext || tag, зашифровано DEK юзера
     resume_encrypted: Mapped[bytes | None] = mapped_column(BYTEA)
@@ -172,6 +175,34 @@ class Source(Base):
     profile: Mapped[Profile] = relationship(back_populates="sources")
 
     __table_args__ = (Index("ix_sources_profile_active", "profile_id", "is_active"),)
+
+
+# ============================================================================
+# source_vacancies — текущий результат парсинга источника (M:N source↔vacancy)
+# ============================================================================
+class SourceVacancy(Base):
+    """Связь «эта вакансия входит в ПОСЛЕДНИЙ результат парсинга источника».
+
+    Вакансии в БД глобальны (дедуп по source_type+external_id), а лента должна
+    показывать только то, что вернул последний парсинг профиля. При каждом
+    refresh набор связей источника ПОЛНОСТЬЮ заменяется — поэтому изменив
+    фильтры и нажав «Обновить», юзер видит свежую выдачу, а не старое + новое.
+    Реакции и отклики (tracker) живут отдельно и не теряются при замене.
+    """
+
+    __tablename__ = "source_vacancies"
+
+    source_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sources.id", ondelete="CASCADE"), primary_key=True
+    )
+    vacancy_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("vacancies.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (Index("ix_source_vacancies_vacancy", "vacancy_id"),)
 
 
 # ============================================================================
@@ -336,6 +367,38 @@ class Letter(Base):
 
 
 # ============================================================================
+# letter_templates — сохранённые шаблоны сопроводительных
+# ============================================================================
+class LetterTemplate(Base):
+    """Переиспользуемый шаблон письма, привязан к профилю.
+
+    body может содержать плейсхолдеры {company}/{position} — подстановка на
+    клиенте при применении к вакансии. Бэкенд хранит сырой текст.
+    """
+
+    __tablename__ = "letter_templates"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (Index("ix_letter_templates_profile", "profile_id"),)
+
+
+# ============================================================================
 # payments
 # ============================================================================
 class Payment(Base):
@@ -384,6 +447,93 @@ class Event(Base):
     __table_args__ = (
         Index("ix_events_user_created", "user_id", created_at.desc()),
         Index("ix_events_type_created", "event_type", created_at.desc()),
+    )
+
+
+# ============================================================================
+# company_reviews — отзывы о компаниях (об отношении к соискателям)
+# ============================================================================
+class CompanyReview(Base):
+    """Отзыв о том, как компания обращается с кандидатами в процессе найма.
+
+    Привязка к компании — через нормализованный company_key (см.
+    domain.company_review.company_key_for). Один отзыв на пару (company_key,
+    user_id): повторная отправка обновляет существующий. score — взвешенный
+    respect-score этого отзыва (денормализован для быстрого AVG-агрегата).
+    Верификация (есть ли отклик к компании) проверяется в сервисе, не в БД.
+    """
+
+    __tablename__ = "company_reviews"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    company_key: Mapped[str] = mapped_column(Text, nullable=False)
+    # Снимок названия на момент отзыва — для отображения (ключ может быть id:...).
+    company_name: Mapped[str | None] = mapped_column(Text)
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    profile_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("profiles.id", ondelete="SET NULL")
+    )
+
+    # Структурные сигналы (англ. коды, см. domain.company_review).
+    responded: Mapped[str] = mapped_column(Text, nullable=False)
+    respect: Mapped[str] = mapped_column(Text, nullable=False)
+    feedback: Mapped[str] = mapped_column(Text, nullable=False)
+    honesty: Mapped[str] = mapped_column(Text, nullable=False)
+    process: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Опциональный свободный текст. Показываем как есть (без модерации в v1).
+    text: Mapped[str | None] = mapped_column(Text)
+
+    # Взвешенный respect-score этого отзыва 0..100 (денормализация для агрегата).
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Авто-скрытие при накоплении жалоб (post-hoc модерация без премодерации).
+    # Скрытые не попадают в публичный список/агрегаты, но автор видит свой.
+    is_hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("company_key", "user_id", name="uq_company_reviews_company_user"),
+        Index("ix_company_reviews_company_key", "company_key"),
+    )
+
+
+class CompanyReviewReport(Base):
+    """Жалоба пользователя на отзыв. Уникальна по (review_id, user_id) —
+    один юзер = один голос. При достижении порога отзыв авто-скрывается."""
+
+    __tablename__ = "company_review_reports"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    review_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("company_reviews.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "review_id", "user_id", name="uq_company_review_reports_review_user"
+        ),
+        Index("ix_company_review_reports_review", "review_id"),
     )
 
 

@@ -30,6 +30,7 @@ def _to_domain(orm: ProfileORM) -> Profile:
         salary_currency=orm.salary_currency,
         work_format=list(orm.work_format or []),  # type: ignore[arg-type]
         schedule=list(orm.schedule or []),  # type: ignore[arg-type]
+        experience=list(orm.experience or []),  # type: ignore[arg-type]
         area_ids=list(orm.area_ids or []),
         exclude_keywords=list(orm.exclude_keywords or []),
         has_resume=orm.resume_encrypted is not None,
@@ -84,6 +85,7 @@ class ProfileRepository(BaseRepository):
             salary_currency=data.salary_currency,
             work_format=data.work_format or None,
             schedule=data.schedule or None,
+            experience=data.experience or None,
             area_ids=data.area_ids or None,
             exclude_keywords=data.exclude_keywords or None,
             category_data=data.category_data,
